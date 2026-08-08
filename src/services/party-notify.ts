@@ -87,10 +87,9 @@ export async function notifyDebtClosed(params: { debtId: number; actor: User }) 
 
 export async function notifyDebtCreated(params: { debt: DebtWithMeta; actor: User }) {
     await sendToParties(params.debt.id, params.actor.id, (user, debt) => {
-        const dirKey = debt.direction === "borrowed" ? "direction_borrowed" : "direction_lent";
-        return t(user.language, "notify_debt_created", {
+        const key = debt.direction === "borrowed" ? "notify_debt_created_borrowed" : "notify_debt_created_lent";
+        return t(user.language, key, {
             name: debt.contact_name,
-            direction: t(user.language, dirKey),
             amount: formatAmount(debt.balance, user.language),
         });
     });
