@@ -12,6 +12,7 @@ export function mainReplyKeyboard(lang: Lang) {
         .text(t(lang, "btn_lent"))
         .text(t(lang, "btn_people"))
         .row()
+        .text(t(lang, "btn_summary"))
         .text(t(lang, "btn_settings"))
         .resized()
         .persistent();

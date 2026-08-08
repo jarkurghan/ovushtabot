@@ -34,6 +34,7 @@ import {
     resolveDebtAccess,
     revokeShare,
     setDueDate,
+    type DebtWithMeta,
 } from "../services/debts";
 import { clearSession, getSession, setSession } from "../services/session";
 import {
@@ -41,6 +42,7 @@ import {
     addMonthsInTashkent,
     firstOfNextMonthInTashkent,
     formatAmount,
+    formatDate,
     parseAmount,
     parseDate,
     todayInTashkent,
@@ -318,6 +320,67 @@ export async function showDebtList(
         }
     } catch (error) {
         await sendErrorLog({ event: "showDebtList", error, ctx });
+    }
+}
+
+function formatSummarySection(lang: Lang, titleKey: string, list: DebtWithMeta[]): string {
+    const lines = [`<b>${t(lang, titleKey)}</b>`];
+    if (!list.length) {
+        lines.push(t(lang, "summary_empty"));
+        return lines.join("\n");
+    }
+
+    for (const d of list) {
+        const amount = formatAmount(d.balance, lang);
+        if (d.due_date) {
+            lines.push(
+                t(lang, "summary_line_due", {
+                    name: d.contact_name,
+                    amount,
+                    due: formatDate(d.due_date, lang),
+                }),
+            );
+        } else {
+            lines.push(t(lang, "summary_line", { name: d.contact_name, amount }));
+        }
+    }
+
+    const total = list.reduce((s, d) => s + d.balance, 0);
+    lines.push(t(lang, "summary_total", { amount: formatAmount(total, lang) }));
+    return lines.join("\n");
+}
+
+/** Ochiq qarzlar matnli hisoboti: olgan / bergan + jami */
+export async function showDebtSummary(ctx: CTX) {
+    try {
+        const [user] = await saveUser(ctx);
+        if (!user) return;
+
+        const open = await listOwnedDebts(user.id, "open");
+        const borrowed = open.filter((d) => d.direction === "borrowed");
+        const lent = open.filter((d) => d.direction === "lent");
+
+        if (!borrowed.length && !lent.length) {
+            await ctx.reply(t(user.language, "summary_none"), {
+                reply_markup: mainReplyKeyboard(user.language),
+            });
+            return;
+        }
+
+        const text = [
+            `<b>${t(user.language, "summary_title")}</b>`,
+            "",
+            formatSummarySection(user.language, "summary_borrowed", borrowed),
+            "",
+            formatSummarySection(user.language, "summary_lent", lent),
+        ].join("\n");
+
+        await ctx.reply(text, {
+            parse_mode: "HTML",
+            reply_markup: mainReplyKeyboard(user.language),
+        });
+    } catch (error) {
+        await sendErrorLog({ event: "showDebtSummary", error, ctx });
     }
 }
 
@@ -626,6 +689,10 @@ export async function handleTextMessage(ctx: CTX) {
         }
         if (text === t(lang, "btn_people") || text === t("uz", "btn_people") || text === t("cyrl", "btn_people")) {
             await showPeopleList(ctx);
+            return;
+        }
+        if (text === t(lang, "btn_summary") || text === t("uz", "btn_summary") || text === t("cyrl", "btn_summary")) {
+            await showDebtSummary(ctx);
             return;
         }
         if (text === t(lang, "btn_settings") || text === t("uz", "btn_settings") || text === t("cyrl", "btn_settings")) {
