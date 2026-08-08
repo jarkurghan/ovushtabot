@@ -300,10 +300,15 @@ export type CreateDebtResult = {
     debt: DebtWithMeta;
     /** Mavjud ochiq qarzga qo'shildi (bir xil yo'nalish) yoki qaytarish (teskari) */
     merged: boolean;
-    /** bir xil yo'nalish → charge; teskari → repay (qarz kamayadi, yangi qarz ochilmaydi) */
-    mergeType?: "charge" | "repay";
+    /** bir xil → charge; teskari → repay (+ qolgan summa yangi yo'nalishda) */
+    mergeType?: "charge" | "repay" | "net";
     amount: number;
     closed?: boolean;
+    /** Teskari qarzdan keyin qolgan summa uchun ochilgan qarz */
+    remainderDebt?: DebtWithMeta;
+    remainderAmount?: number;
+    /** Net paytda qaytarish bo'lgan eski qarz id */
+    settledDebtId?: number;
 };
 
 function flipDirection(direction: Direction): Direction {
@@ -439,98 +444,105 @@ export async function createDebt(params: {
               contact.id,
           );
 
-    const applyToExisting = async (
-        debtId: number,
-        type: "charge" | "repay",
-    ): Promise<CreateDebtResult> => {
-        const existing = await getDebtById(debtId);
-        if (!existing) throw new Error("createDebt merge: debt missing");
-        if (existing.status === "closed") {
-            await db.update(debts).set({ status: "open" }).where(eq(debts.id, debtId));
-        }
+    const createFresh = async (amount: number, dueDate?: string | null): Promise<DebtWithMeta> => {
+        const [debt] = await db
+            .insert(debts)
+            .values({
+                owner_id: params.ownerId,
+                contact_id: contact.id,
+                direction: params.direction,
+                due_date: dueDate || null,
+                status: "open",
+            })
+            .returning();
 
-        let amount = params.amount;
-        if (type === "repay") {
-            const bal = existing.balance > 0 ? existing.balance : 0;
-            amount = Math.min(params.amount, bal);
-            if (amount <= 0) {
-                return { debt: existing, merged: true, mergeType: "repay", amount: 0, closed: true };
-            }
-        }
-
-        const result = await addDebtItem({
-            debtId,
-            type,
+        await db.insert(debtItems).values({
+            debt_id: debt.id,
+            type: "charge",
             amount,
-            createdBy: params.createdBy,
+            created_by: params.createdBy,
+            note: null,
         });
-        if (type === "charge" && params.dueDate) {
-            await setDueDate(debtId, params.dueDate);
+
+        const peerUserId = await resolveContactLinkedUserId(contact);
+        if (peerUserId && peerUserId !== params.ownerId) {
+            const { ensureTwinDebt } = await import("./debt-link");
+            await ensureTwinDebt(debt.id, peerUserId);
         }
-        const debt = await getDebtById(debtId);
-        if (!debt) throw new Error("createDebt merge: debt missing after item");
-        return {
-            debt,
-            merged: true,
-            mergeType: type,
-            amount,
-            closed: result.closed,
-        };
+
+        const created = await getDebtById(debt.id);
+        if (!created) throw new Error("createDebt: fresh debt missing");
+        return created;
     };
 
     if (sameDirId) {
-        return applyToExisting(sameDirId, "charge");
+        const existing = await getDebtById(sameDirId);
+        if (!existing) throw new Error("createDebt merge: debt missing");
+        if (existing.status === "closed") {
+            await db.update(debts).set({ status: "open" }).where(eq(debts.id, sameDirId));
+        }
+        await addDebtItem({
+            debtId: sameDirId,
+            type: "charge",
+            amount: params.amount,
+            createdBy: params.createdBy,
+        });
+        if (params.dueDate) {
+            await setDueDate(sameDirId, params.dueDate);
+        }
+        const debt = await getDebtById(sameDirId);
+        if (!debt) throw new Error("createDebt merge: debt missing after charge");
+        return { debt, merged: true, mergeType: "charge", amount: params.amount };
     }
+
     if (oppositeDirId) {
-        return applyToExisting(oppositeDirId, "repay");
+        // Teskari yo'nalish: avval eski qarzdan qaytarish, ortiqcha bo'lsa yangi yo'nalishda qarz
+        const existing = await getDebtById(oppositeDirId);
+        if (!existing) throw new Error("createDebt opposite: debt missing");
+        const bal = existing.balance > 0 ? existing.balance : 0;
+        const repayAmount = Math.min(params.amount, bal);
+        const remainder = params.amount - repayAmount;
+
+        let closed = false;
+        if (repayAmount > 0) {
+            const result = await addDebtItem({
+                debtId: oppositeDirId,
+                type: "repay",
+                amount: repayAmount,
+                createdBy: params.createdBy,
+            });
+            closed = result.closed;
+        }
+
+        const afterRepay = await getDebtById(oppositeDirId);
+        if (!afterRepay) throw new Error("createDebt opposite: debt missing after repay");
+
+        if (remainder > 0) {
+            const remainderDebt = await createFresh(remainder, params.dueDate ?? null);
+            return {
+                debt: remainderDebt,
+                merged: true,
+                mergeType: "net",
+                amount: repayAmount,
+                closed,
+                remainderDebt,
+                remainderAmount: remainder,
+                settledDebtId: oppositeDirId,
+            };
+        }
+
+        return {
+            debt: afterRepay,
+            merged: true,
+            mergeType: "repay",
+            amount: repayAmount,
+            closed,
+            settledDebtId: oppositeDirId,
+        };
     }
 
-    const [debt] = await db
-        .insert(debts)
-        .values({
-            owner_id: params.ownerId,
-            contact_id: contact.id,
-            direction: params.direction,
-            due_date: params.dueDate || null,
-            status: "open",
-        })
-        .returning();
-
-    await db.insert(debtItems).values({
-        debt_id: debt.id,
-        type: "charge",
-        amount: params.amount,
-        created_by: params.createdBy,
-        note: null,
-    });
-
-    const peerUserId = await resolveContactLinkedUserId(contact);
-    if (peerUserId && peerUserId !== params.ownerId) {
-        const { ensureTwinDebt } = await import("./debt-link");
-        await ensureTwinDebt(debt.id, peerUserId);
-    }
-
-    const created = await getDebtById(debt.id);
-    if (created) return { debt: created, merged: false, amount: params.amount };
-
-    return {
-        debt: {
-            id: debt.id,
-            owner_id: debt.owner_id,
-            contact_id: contact.id,
-            contact_name: contact.name,
-            direction: debt.direction as Direction,
-            due_date: debt.due_date,
-            status: debt.status as "open" | "closed",
-            note: debt.note,
-            linked_debt_id: debt.linked_debt_id ?? null,
-            balance: params.amount,
-            initial_amount: params.amount,
-            created_at: debt.created_at,
-        },
-        merged: false,
-        amount: params.amount,
-    };
+    const created = await createFresh(params.amount, params.dueDate ?? null);
+    return { debt: created, merged: false, amount: params.amount };
 }
 
 export async function addDebtItem(params: {

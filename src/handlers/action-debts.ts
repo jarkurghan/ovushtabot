@@ -74,12 +74,29 @@ function resolveDuePreset(text: string, lang: Lang): string | null {
 }
 
 async function notifyAfterDebtCreate(result: CreateDebtResult, actor: User) {
+    if (result.mergeType === "net" || result.mergeType === "repay") {
+        if (result.amount > 0 && result.settledDebtId) {
+            const settled = await getDebtById(result.settledDebtId);
+            await notifyDebtItemAdded({
+                debtId: result.settledDebtId,
+                actor,
+                type: "repay",
+                amount: result.amount,
+                balance: settled?.balance ?? 0,
+                closed: !!result.closed,
+            });
+        }
+        if (result.mergeType === "net" && result.remainderDebt) {
+            await notifyDebtCreated({ debt: result.remainderDebt, actor });
+        }
+        return;
+    }
     if (result.merged) {
         if (result.amount <= 0) return;
         await notifyDebtItemAdded({
             debtId: result.debt.id,
             actor,
-            type: result.mergeType === "repay" ? "repay" : "charge",
+            type: "charge",
             amount: result.amount,
             balance: result.debt.balance,
             closed: !!result.closed,
@@ -91,16 +108,49 @@ async function notifyAfterDebtCreate(result: CreateDebtResult, actor: User) {
 
 function titleAfterDebtCreate(lang: Lang, result: CreateDebtResult): string {
     if (!result.merged) return t(lang, "debt_created");
+    if (result.mergeType === "net") {
+        const lines: string[] = [];
+        if (result.amount > 0) {
+            lines.push(t(lang, "repaid"));
+            if (result.closed) lines.push(t(lang, "remain_zero_closed"));
+        }
+        if (result.remainderAmount && result.remainderDebt) {
+            lines.push(t(lang, "debt_created"));
+        }
+        return lines.join("\n") || t(lang, "debt_created");
+    }
     if (result.mergeType === "repay") {
         return result.closed ? `${t(lang, "repaid")}\n${t(lang, "remain_zero_closed")}` : t(lang, "repaid");
     }
     return t(lang, "charged");
 }
 
+async function replyAfterDebtCreate(ctx: CTX, lang: Lang, result: CreateDebtResult) {
+    const title = titleAfterDebtCreate(lang, result);
+    // Faqat yopilgan qaytarish — 0 balansli kartani ko'rsatmaslik
+    if (result.mergeType === "repay" && result.closed && !result.remainderDebt) {
+        await ctx.reply(title, { reply_markup: mainReplyKeyboard(lang) });
+        return;
+    }
+    await ctx.reply(`${title}\n\n${formatDebtCard(lang, result.debt)}`, {
+        parse_mode: "HTML",
+        reply_markup: mainReplyKeyboard(lang),
+    });
+}
+
 async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
     const [user] = await saveUser(ctx);
     if (!user) return;
-    setSession(ctx.from!.id, { step: "idle", asOwnerId: asOwnerId || user.id });
+    clearSession(ctx.from!.id);
+    setSession(ctx.from!.id, {
+        step: "idle",
+        asOwnerId: asOwnerId || user.id,
+        direction: undefined,
+        contactName: undefined,
+        contactId: undefined,
+        amount: undefined,
+        debtId: undefined,
+    });
     await ctx.reply(t(user.language, "choose_direction"), {
         reply_markup: directionKeyboard(user.language),
     });
@@ -805,10 +855,7 @@ export async function handleTextMessage(ctx: CTX) {
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
-                await ctx.reply(
-                    `${titleAfterDebtCreate(lang, result)}\n\n${formatDebtCard(lang, result.debt)}`,
-                    { parse_mode: "HTML", reply_markup: mainReplyKeyboard(lang) },
-                );
+                await replyAfterDebtCreate(ctx, lang, result);
                 return;
             }
             if (session.step === "set_due_date" && session.debtId) {
@@ -883,13 +930,7 @@ export async function handleTextMessage(ctx: CTX) {
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
-                await ctx.reply(
-                    `${titleAfterDebtCreate(lang, result)}\n\n${formatDebtCard(lang, result.debt)}`,
-                    {
-                        parse_mode: "HTML",
-                        reply_markup: mainReplyKeyboard(lang),
-                    },
-                );
+                await replyAfterDebtCreate(ctx, lang, result);
                 return;
             }
 
@@ -930,13 +971,7 @@ export async function handleTextMessage(ctx: CTX) {
             });
             clearSession(ctx.from.id);
             await notifyAfterDebtCreate(result, user);
-            await ctx.reply(
-                `${titleAfterDebtCreate(lang, result)}\n\n${formatDebtCard(lang, result.debt)}`,
-                {
-                    parse_mode: "HTML",
-                    reply_markup: mainReplyKeyboard(lang),
-                },
-            );
+            await replyAfterDebtCreate(ctx, lang, result);
             return;
         }
 
