@@ -135,11 +135,12 @@ export function debtDetailKeyboard(
     isOwner: boolean,
     backCallback = "list_open",
     canShare = true,
+    hasDueDate = false,
 ) {
     const kb = new InlineKeyboard();
     if (canWrite) {
         kb.text(`↩️ ${t(lang, "repay")}`, `repay_${debtId}`).text(`➕ ${t(lang, "charge")}`, `charge_${debtId}`).row();
-        kb.text(t(lang, "set_due"), `due_${debtId}`).row();
+        kb.text(t(lang, hasDueDate ? "change_due" : "set_due"), `due_${debtId}`).row();
     }
     if (isOwner && canShare) {
         kb.text(t(lang, "share_debt"), `share_${debtId}`).row();

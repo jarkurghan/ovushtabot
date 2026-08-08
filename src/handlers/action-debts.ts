@@ -454,6 +454,7 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
                 access.isOwner,
                 backCallback,
                 canShare,
+                !!debt.due_date,
             ),
         }).catch(async () => {
             await ctx.reply(text, {
@@ -465,6 +466,7 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
                     access.isOwner,
                     backCallback,
                     canShare,
+                    !!debt.due_date,
                 ),
             });
         });
@@ -569,11 +571,20 @@ export async function onShareStart(ctx: CTX, debtId: number) {
 
         const me = await bot.api.getMe();
         const link = `https://t.me/${me.username}?start=share_${invite.token}`;
+        const debt = await getDebtById(debtId);
 
         await ctx.answerCallbackQuery().catch(() => undefined);
         await ctx.editMessageText(`${t(user.language, "share_link_debt")}\n\n<code>${link}</code>`, {
             parse_mode: "HTML",
-            reply_markup: debtDetailKeyboard(user.language, debtId, true, true),
+            reply_markup: debtDetailKeyboard(
+                user.language,
+                debtId,
+                true,
+                true,
+                "list_open",
+                true,
+                !!debt?.due_date,
+            ),
         }).catch(async () => {
             await ctx.reply(`${t(user.language, "share_link_debt")}\n\n<code>${link}</code>`, {
                 parse_mode: "HTML",
