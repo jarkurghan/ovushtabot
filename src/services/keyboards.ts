@@ -2,7 +2,7 @@ import { InlineKeyboard, Keyboard } from "grammy";
 import { t } from "../i18n";
 import type { Lang } from "../utils/types";
 import type { DebtWithMeta } from "./debts";
-import { formatAmount, formatDate } from "../utils/format";
+import { escapeHtml, formatAmount, formatDate } from "../utils/format";
 
 export function mainReplyKeyboard(lang: Lang) {
     return new Keyboard()
@@ -215,14 +215,18 @@ export function formatDebtCard(lang: Lang, debt: DebtWithMeta, itemsPreview?: st
     return lines.join("\n");
 }
 
-export function formatItemsPreview(lang: Lang, items: { type: string; amount: number; created_at: Date }[]): string {
+export function formatItemsPreview(
+    lang: Lang,
+    items: { type: string; amount: number; created_at: Date; note?: string | null }[],
+): string {
     if (!items.length) return "—";
     return items
         .slice(0, 8)
         .map((i) => {
             const sign = i.type === "charge" ? "+" : "−";
             const d = formatDate(i.created_at.toISOString().slice(0, 10), lang);
-            return `${sign}${formatAmount(i.amount, lang)} (${d})`;
+            const note = i.note?.trim() ? ` — ${escapeHtml(i.note.trim())}` : "";
+            return `${sign}${formatAmount(i.amount, lang)} (${d})${note}`;
         })
         .join("\n");
 }

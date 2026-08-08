@@ -422,7 +422,9 @@ export async function createDebt(params: {
     dueDate?: string | null;
     createdBy: number;
     contactId?: number | null;
+    note?: string | null;
 }): Promise<CreateDebtResult> {
+    const itemNote = params.note?.trim() ? params.note.trim() : null;
     const contact = params.contactId
         ? ((await getContactById(params.contactId, params.ownerId)) ??
           (await getOrCreateContact(params.ownerId, params.contactName)))
@@ -461,7 +463,7 @@ export async function createDebt(params: {
             type: "charge",
             amount,
             created_by: params.createdBy,
-            note: null,
+            note: itemNote,
         });
 
         const peerUserId = await resolveContactLinkedUserId(contact);
@@ -486,6 +488,7 @@ export async function createDebt(params: {
             type: "charge",
             amount: params.amount,
             createdBy: params.createdBy,
+            note: itemNote,
         });
         if (params.dueDate) {
             await setDueDate(sameDirId, params.dueDate);
@@ -510,6 +513,7 @@ export async function createDebt(params: {
                 type: "repay",
                 amount: repayAmount,
                 createdBy: params.createdBy,
+                note: itemNote,
             });
             closed = result.closed;
         }

@@ -4,6 +4,7 @@ import { saveUser, getUserById } from "../services/save-user";
 import {
     actAsKeyboard,
     cancelKeyboard,
+    cancelSkipKeyboard,
     contactDebtsKeyboard,
     dueDateKeyboard,
     contactPickerKeyboard,
@@ -138,6 +139,131 @@ async function replyAfterDebtCreate(ctx: CTX, lang: Lang, result: CreateDebtResu
     });
 }
 
+const NOTE_MAX_LEN = 200;
+
+function normalizeItemNote(text: string): string | null | "invalid" {
+    const trimmed = text.trim().replace(/\s+/g, " ");
+    if (!trimmed) return null;
+    if (trimmed.length > NOTE_MAX_LEN) return "invalid";
+    return trimmed;
+}
+
+async function askItemNote(ctx: CTX, lang: Lang) {
+    await ctx.reply(`${t(lang, "ask_item_note")}\n${t(lang, "note_hint")}`, {
+        reply_markup: cancelSkipKeyboard(lang),
+    });
+}
+
+async function continueAfterItemNote(ctx: CTX, user: User, lang: Lang, note: string | null) {
+    const session = getSession(ctx.from!.id);
+    const action = session.itemAction;
+
+    if (action === "add") {
+        if (!session.direction || !session.contactName || !session.amount) {
+            clearSession(ctx.from!.id);
+            await ctx.reply(t(lang, "cancelled"), { reply_markup: mainReplyKeyboard(lang) });
+            return;
+        }
+
+        if (session.needsDueDate) {
+            setSession(ctx.from!.id, {
+                step: "add_due_date",
+                amount: session.amount,
+                note,
+                contactName: session.contactName,
+                contactId: session.contactId,
+                direction: session.direction,
+                asOwnerId: session.asOwnerId,
+                itemAction: undefined,
+                needsDueDate: undefined,
+            });
+            await ctx.reply(t(lang, "ask_due_date"), { reply_markup: dueDateKeyboard(lang) });
+            return;
+        }
+
+        const result = await createDebt({
+            ownerId: session.asOwnerId || user.id,
+            contactName: session.contactName,
+            direction: session.direction,
+            amount: session.amount,
+            dueDate: null,
+            createdBy: user.id,
+            contactId: session.contactId,
+            note,
+        });
+        clearSession(ctx.from!.id);
+        await notifyAfterDebtCreate(result, user);
+        await replyAfterDebtCreate(ctx, lang, result);
+        return;
+    }
+
+    if (action === "repay" && session.debtId && session.amount) {
+        const access = await resolveDebtAccess(user, session.debtId);
+        if (!access.canWrite) {
+            clearSession(ctx.from!.id);
+            await ctx.reply(t(lang, "write_denied"), { reply_markup: mainReplyKeyboard(lang) });
+            return;
+        }
+        const debtId = session.debtId;
+        const amount = session.amount;
+        const result = await addDebtItem({
+            debtId,
+            type: "repay",
+            amount,
+            createdBy: user.id,
+            note,
+        });
+        clearSession(ctx.from!.id);
+        await notifyDebtItemAdded({
+            debtId,
+            actor: user,
+            type: "repay",
+            amount,
+            balance: result.balance,
+            closed: result.closed,
+        });
+        let msg = `${t(lang, "repaid")}\n${t(lang, "balance")}: ${formatAmount(result.balance, lang)}`;
+        if (result.closed) msg += `\n${t(lang, "remain_zero_closed")}`;
+        await ctx.reply(msg, { reply_markup: mainReplyKeyboard(lang) });
+        return;
+    }
+
+    if (action === "charge" && session.debtId && session.amount) {
+        const access = await resolveDebtAccess(user, session.debtId);
+        if (!access.canWrite) {
+            clearSession(ctx.from!.id);
+            await ctx.reply(t(lang, "write_denied"), { reply_markup: mainReplyKeyboard(lang) });
+            return;
+        }
+        const debtId = session.debtId;
+        const amount = session.amount;
+        const result = await addDebtItem({
+            debtId,
+            type: "charge",
+            amount,
+            createdBy: user.id,
+            note,
+        });
+        clearSession(ctx.from!.id);
+        await notifyDebtItemAdded({
+            debtId,
+            actor: user,
+            type: "charge",
+            amount,
+            balance: result.balance,
+            closed: result.closed,
+        });
+        await ctx.reply(
+            `${t(lang, "charged")}\n${t(lang, "balance")}: ${formatAmount(result.balance, lang)}`,
+            { reply_markup: mainReplyKeyboard(lang) },
+        );
+        return;
+    }
+
+    clearSession(ctx.from!.id);
+    await ctx.reply(t(lang, "cancelled"), { reply_markup: mainReplyKeyboard(lang) });
+}
+
 async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
     const [user] = await saveUser(ctx);
     if (!user) return;
@@ -149,6 +275,9 @@ async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
         contactName: undefined,
         contactId: undefined,
         amount: undefined,
+        note: undefined,
+        itemAction: undefined,
+        needsDueDate: undefined,
         debtId: undefined,
     });
     await ctx.reply(t(user.language, "choose_direction"), {
@@ -843,6 +972,10 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         if (text === t(lang, "btn_skip") || text === t("uz", "btn_skip") || text === t("cyrl", "btn_skip")) {
+            if (session.step === "item_note") {
+                await continueAfterItemNote(ctx, user, lang, null);
+                return;
+            }
             if (session.step === "add_due_date" && session.direction && session.contactName && session.amount) {
                 const result = await createDebt({
                     ownerId: session.asOwnerId || user.id,
@@ -852,6 +985,7 @@ export async function handleTextMessage(ctx: CTX) {
                     dueDate: null,
                     createdBy: user.id,
                     contactId: session.contactId,
+                    note: session.note,
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
@@ -866,6 +1000,16 @@ export async function handleTextMessage(ctx: CTX) {
                 await ctx.reply(t(lang, "due_set"), { reply_markup: mainReplyKeyboard(lang) });
                 return;
             }
+        }
+
+        if (session.step === "item_note") {
+            const note = normalizeItemNote(text);
+            if (note === "invalid") {
+                await ctx.reply(t(lang, "invalid_note"), { reply_markup: cancelSkipKeyboard(lang) });
+                return;
+            }
+            await continueAfterItemNote(ctx, user, lang, note);
+            return;
         }
 
         if (session.step === "add_contact_name") {
@@ -918,31 +1062,19 @@ export async function handleTextMessage(ctx: CTX) {
             const openId =
                 (await findOpenDebtId(ownerId, session.contactName, session.direction, session.contactId)) ??
                 (await findOpenDebtId(ownerId, session.contactName, oppositeDir, session.contactId));
-            if (openId) {
-                const result = await createDebt({
-                    ownerId,
-                    contactName: session.contactName,
-                    direction: session.direction,
-                    amount,
-                    dueDate: null,
-                    createdBy: user.id,
-                    contactId: session.contactId,
-                });
-                clearSession(ctx.from.id);
-                await notifyAfterDebtCreate(result, user);
-                await replyAfterDebtCreate(ctx, lang, result);
-                return;
-            }
 
             setSession(ctx.from.id, {
-                step: "add_due_date",
+                step: "item_note",
                 amount,
                 contactName: session.contactName,
                 contactId: session.contactId,
                 direction: session.direction,
                 asOwnerId: session.asOwnerId,
+                itemAction: "add",
+                needsDueDate: !openId,
+                note: undefined,
             });
-            await ctx.reply(t(lang, "ask_due_date"), { reply_markup: dueDateKeyboard(lang) });
+            await askItemNote(ctx, lang);
             return;
         }
 
@@ -968,6 +1100,7 @@ export async function handleTextMessage(ctx: CTX) {
                 dueDate: due,
                 createdBy: user.id,
                 contactId: session.contactId,
+                note: session.note,
             });
             clearSession(ctx.from.id);
             await notifyAfterDebtCreate(result, user);
@@ -998,25 +1131,14 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
 
-            const debtId = session.debtId;
-            const result = await addDebtItem({
-                debtId,
-                type: "repay",
+            setSession(ctx.from.id, {
+                step: "item_note",
+                debtId: session.debtId,
                 amount,
-                createdBy: user.id,
+                itemAction: "repay",
+                note: undefined,
             });
-            clearSession(ctx.from.id);
-            await notifyDebtItemAdded({
-                debtId,
-                actor: user,
-                type: "repay",
-                amount,
-                balance: result.balance,
-                closed: result.closed,
-            });
-            let msg = `${t(lang, "repaid")}\n${t(lang, "balance")}: ${formatAmount(result.balance, lang)}`;
-            if (result.closed) msg += `\n${t(lang, "remain_zero_closed")}`;
-            await ctx.reply(msg, { reply_markup: mainReplyKeyboard(lang) });
+            await askItemNote(ctx, lang);
             return;
         }
 
@@ -1032,25 +1154,14 @@ export async function handleTextMessage(ctx: CTX) {
                 await ctx.reply(t(lang, "write_denied"), { reply_markup: mainReplyKeyboard(lang) });
                 return;
             }
-            const result = await addDebtItem({
+            setSession(ctx.from.id, {
+                step: "item_note",
                 debtId: session.debtId,
-                type: "charge",
                 amount,
-                createdBy: user.id,
+                itemAction: "charge",
+                note: undefined,
             });
-            clearSession(ctx.from.id);
-            await notifyDebtItemAdded({
-                debtId: session.debtId,
-                actor: user,
-                type: "charge",
-                amount,
-                balance: result.balance,
-                closed: result.closed,
-            });
-            await ctx.reply(
-                `${t(lang, "charged")}\n${t(lang, "balance")}: ${formatAmount(result.balance, lang)}`,
-                { reply_markup: mainReplyKeyboard(lang) },
-            );
+            await askItemNote(ctx, lang);
             return;
         }
 

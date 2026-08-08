@@ -49,6 +49,7 @@ export type SessionStep =
     | "idle"
     | "add_contact_name"
     | "add_amount"
+    | "item_note"
     | "add_due_date"
     | "repay_amount"
     | "charge_amount"
@@ -58,6 +59,9 @@ export type SessionStep =
     | "browse_contacts"
     | "rename_contact";
 
+/** Summadan keyin izoh so'ralganda qaysi amal davom etadi */
+export type ItemNoteAction = "add" | "repay" | "charge";
+
 export type SessionData = {
     step: SessionStep;
     direction?: Direction;
@@ -65,6 +69,12 @@ export type SessionData = {
     contactId?: number;
     debtId?: number;
     amount?: number;
+    /** Item izohi (ixtiyoriy) */
+    note?: string | null;
+    /** item_note qadamidan keyin qaysi oqim */
+    itemAction?: ItemNoteAction;
+    /** Yangi qarz uchun muddat so'ralsinmi (merge emas) */
+    needsDueDate?: boolean;
     /** Account ulashish orqali boshqa user nomidan yozish */
     asOwnerId?: number;
     /** Tanishlar bo'limidan ochilgan qarz — ortga qaytish uchun */
