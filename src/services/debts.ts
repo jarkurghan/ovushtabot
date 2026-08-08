@@ -239,7 +239,14 @@ export async function getDebtItems(debtId: number): Promise<DebtItemRow[]> {
 }
 
 /** Ownerning ochiq/yopiq qarzlari */
-export async function listOwnedDebts(ownerId: number, status: "open" | "closed" = "open"): Promise<DebtWithMeta[]> {
+export async function listOwnedDebts(
+    ownerId: number,
+    status: "open" | "closed" = "open",
+    direction?: Direction,
+): Promise<DebtWithMeta[]> {
+    const conditions = [eq(debts.owner_id, ownerId), eq(debts.status, status)];
+    if (direction) conditions.push(eq(debts.direction, direction));
+
     const rows = await db
         .select({
             id: debts.id,
@@ -254,7 +261,7 @@ export async function listOwnedDebts(ownerId: number, status: "open" | "closed" 
         })
         .from(debts)
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
-        .where(and(eq(debts.owner_id, ownerId), eq(debts.status, status)))
+        .where(and(...conditions))
         .orderBy(desc(debts.updated_at));
 
     const balances = await balanceForDebtIds(rows.map((r) => r.id));

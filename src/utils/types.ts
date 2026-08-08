@@ -68,5 +68,7 @@ export type SessionData = {
     asOwnerId?: number;
     /** Tanishlar bo'limidan ochilgan qarz — ortga qaytish uchun */
     browseContactId?: number;
+    /** Qarzlar ro'yxati turi — detalda ortga qaytish uchun */
+    listMode?: "all" | "lent";
     updatedAt: number;
 };

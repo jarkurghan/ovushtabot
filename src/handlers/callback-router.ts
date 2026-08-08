@@ -68,12 +68,22 @@ export async function registerCallbackRouter(ctx: CTX) {
         }
 
         if (data === "list_open") {
-            await showDebtList(ctx, "open");
+            await showDebtList(ctx, "open", "all");
             return;
         }
 
         if (data === "list_closed") {
-            await showDebtList(ctx, "closed");
+            await showDebtList(ctx, "closed", "all");
+            return;
+        }
+
+        if (data === "list_lent") {
+            await showDebtList(ctx, "open", "lent");
+            return;
+        }
+
+        if (data === "list_lent_closed") {
+            await showDebtList(ctx, "closed", "lent");
             return;
         }
 
