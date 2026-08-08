@@ -296,6 +296,13 @@ async function resolveContactLinkedUserId(contact: typeof contacts.$inferSelect)
     return twin.owner_id;
 }
 
+export type CreateDebtResult = {
+    debt: DebtWithMeta;
+    /** Mavjud ochiq qarzga charge sifatida qo'shildi */
+    merged: boolean;
+    amount: number;
+};
+
 export async function createDebt(params: {
     ownerId: number;
     contactName: string;
@@ -303,8 +310,38 @@ export async function createDebt(params: {
     amount: number;
     dueDate?: string | null;
     createdBy: number;
-}): Promise<DebtWithMeta> {
+}): Promise<CreateDebtResult> {
     const contact = await getOrCreateContact(params.ownerId, params.contactName);
+
+    // Shu tanish + yo'nalishda ochiq qarz bo'lsa — yangi qarz emas, item
+    const [openExisting] = await db
+        .select({ id: debts.id })
+        .from(debts)
+        .where(
+            and(
+                eq(debts.owner_id, params.ownerId),
+                eq(debts.contact_id, contact.id),
+                eq(debts.direction, params.direction),
+                eq(debts.status, "open"),
+            ),
+        )
+        .orderBy(desc(debts.updated_at))
+        .limit(1);
+
+    if (openExisting) {
+        await addDebtItem({
+            debtId: openExisting.id,
+            type: "charge",
+            amount: params.amount,
+            createdBy: params.createdBy,
+        });
+        if (params.dueDate) {
+            await setDueDate(openExisting.id, params.dueDate);
+        }
+        const debt = await getDebtById(openExisting.id);
+        if (!debt) throw new Error("createDebt merge: debt missing");
+        return { debt, merged: true, amount: params.amount };
+    }
 
     const [debt] = await db
         .insert(debts)
@@ -333,21 +370,25 @@ export async function createDebt(params: {
     }
 
     const created = await getDebtById(debt.id);
-    if (created) return created;
+    if (created) return { debt: created, merged: false, amount: params.amount };
 
     return {
-        id: debt.id,
-        owner_id: debt.owner_id,
-        contact_id: contact.id,
-        contact_name: contact.name,
-        direction: debt.direction as Direction,
-        due_date: debt.due_date,
-        status: debt.status as "open" | "closed",
-        note: debt.note,
-        linked_debt_id: debt.linked_debt_id ?? null,
-        balance: params.amount,
-        initial_amount: params.amount,
-        created_at: debt.created_at,
+        debt: {
+            id: debt.id,
+            owner_id: debt.owner_id,
+            contact_id: contact.id,
+            contact_name: contact.name,
+            direction: debt.direction as Direction,
+            due_date: debt.due_date,
+            status: debt.status as "open" | "closed",
+            note: debt.note,
+            linked_debt_id: debt.linked_debt_id ?? null,
+            balance: params.amount,
+            initial_amount: params.amount,
+            created_at: debt.created_at,
+        },
+        merged: false,
+        amount: params.amount,
     };
 }
 

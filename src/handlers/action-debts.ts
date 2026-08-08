@@ -1,4 +1,4 @@
-import type { CTX, Direction, Lang } from "../utils/types";
+import type { CTX, Direction, Lang, User } from "../utils/types";
 import { t } from "../i18n";
 import { saveUser, getUserById } from "../services/save-user";
 import {
@@ -36,6 +36,7 @@ import {
     resolveDebtAccess,
     revokeShare,
     setDueDate,
+    type CreateDebtResult,
     type DebtWithMeta,
 } from "../services/debts";
 import { clearSession, getSession, setSession } from "../services/session";
@@ -49,6 +50,14 @@ import {
     parseDate,
     todayInTashkent,
 } from "../utils/format";
+import { sendErrorLog } from "../services/log";
+import {
+    notifyDebtClosed,
+    notifyDebtCreated,
+    notifyDebtDueChanged,
+    notifyDebtItemAdded,
+} from "../services/party-notify";
+import { bot } from "../bot";
 
 /** Tezkor sana tugmasi → ISO sana; null = tugma emas */
 function resolveDuePreset(text: string, lang: Lang): string | null {
@@ -62,14 +71,21 @@ function resolveDuePreset(text: string, lang: Lang): string | null {
     if (match("due_in_1_month")) return addMonthsInTashkent(1);
     return null;
 }
-import { sendErrorLog } from "../services/log";
-import {
-    notifyDebtClosed,
-    notifyDebtCreated,
-    notifyDebtDueChanged,
-    notifyDebtItemAdded,
-} from "../services/party-notify";
-import { bot } from "../bot";
+
+async function notifyAfterDebtCreate(result: CreateDebtResult, actor: User) {
+    if (result.merged) {
+        await notifyDebtItemAdded({
+            debtId: result.debt.id,
+            actor,
+            type: "charge",
+            amount: result.amount,
+            balance: result.debt.balance,
+            closed: false,
+        });
+        return;
+    }
+    await notifyDebtCreated({ debt: result.debt, actor });
+}
 
 async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
     const [user] = await saveUser(ctx);
@@ -757,7 +773,7 @@ export async function handleTextMessage(ctx: CTX) {
 
         if (text === t(lang, "btn_skip") || text === t("uz", "btn_skip") || text === t("cyrl", "btn_skip")) {
             if (session.step === "add_due_date" && session.direction && session.contactName && session.amount) {
-                const debt = await createDebt({
+                const result = await createDebt({
                     ownerId: session.asOwnerId || user.id,
                     contactName: session.contactName,
                     direction: session.direction,
@@ -766,9 +782,10 @@ export async function handleTextMessage(ctx: CTX) {
                     createdBy: user.id,
                 });
                 clearSession(ctx.from.id);
-                await notifyDebtCreated({ debt, actor: user });
+                await notifyAfterDebtCreate(result, user);
+                const title = result.merged ? t(lang, "charged") : t(lang, "debt_created");
                 await ctx.reply(
-                    `${t(lang, "debt_created")}\n\n${formatDebtCard(lang, debt)}`,
+                    `${title}\n\n${formatDebtCard(lang, result.debt)}`,
                     { parse_mode: "HTML", reply_markup: mainReplyKeyboard(lang) },
                 );
                 return;
@@ -846,7 +863,7 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
 
-            const debt = await createDebt({
+            const result = await createDebt({
                 ownerId: session.asOwnerId || user.id,
                 contactName: session.contactName,
                 direction: session.direction,
@@ -855,8 +872,9 @@ export async function handleTextMessage(ctx: CTX) {
                 createdBy: user.id,
             });
             clearSession(ctx.from.id);
-            await notifyDebtCreated({ debt, actor: user });
-            await ctx.reply(`${t(lang, "debt_created")}\n\n${formatDebtCard(lang, debt)}`, {
+            await notifyAfterDebtCreate(result, user);
+            const title = result.merged ? t(lang, "charged") : t(lang, "debt_created");
+            await ctx.reply(`${title}\n\n${formatDebtCard(lang, result.debt)}`, {
                 parse_mode: "HTML",
                 reply_markup: mainReplyKeyboard(lang),
             });
