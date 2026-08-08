@@ -14,7 +14,7 @@ export type DebtWithMeta = {
     note: string | null;
     linked_debt_id: number | null;
     balance: number;
-    /** Birinchi charge summasi (yopilgan ro'yxat uchun) */
+    /** Birinchi charge summasi (arxiv ro'yxati uchun) */
     initial_amount: number;
     created_at: Date;
 };
