@@ -1056,6 +1056,18 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
 
+            // «Hammasi» — izoh so'ralmasin, avtomatik yoziladi
+            if (isAll) {
+                setSession(ctx.from.id, {
+                    step: "item_note",
+                    debtId: session.debtId,
+                    amount,
+                    itemAction: "repay",
+                });
+                await continueAfterItemNote(ctx, user, lang, t(lang, "note_repay_all"));
+                return;
+            }
+
             setSession(ctx.from.id, {
                 step: "item_note",
                 debtId: session.debtId,
