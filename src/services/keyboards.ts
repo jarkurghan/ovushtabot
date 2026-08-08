@@ -211,7 +211,7 @@ export function formatItemsPreview(lang: Lang, items: { type: string; amount: nu
         .map((i) => {
             const sign = i.type === "charge" ? "+" : "−";
             const d = formatDate(i.created_at.toISOString().slice(0, 10), lang);
-            return `• ${sign}${formatAmount(i.amount, lang)} (${d})`;
+            return `${sign}${formatAmount(i.amount, lang)} (${d})`;
         })
         .join("\n");
 }
