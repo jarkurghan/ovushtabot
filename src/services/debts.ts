@@ -307,32 +307,15 @@ function flipDirection(direction: Direction): Direction {
     return direction === "borrowed" ? "lent" : "borrowed";
 }
 
-/** Owner + peer o'rtasidagi ochiq qarz (yo'nalish bo'yicha) */
-async function findOpenDebtWithPeer(
-    ownerId: number,
-    peerUserId: number,
-    direction: Direction,
-): Promise<number | null> {
-    const [row] = await db
-        .select({ id: debts.id })
-        .from(debts)
-        .innerJoin(contacts, eq(contacts.id, debts.contact_id))
-        .where(
-            and(
-                eq(debts.owner_id, ownerId),
-                eq(debts.direction, direction),
-                eq(debts.status, "open"),
-                eq(contacts.linked_user_id, peerUserId),
-            ),
-        )
-        .orderBy(desc(debts.updated_at))
-        .limit(1);
-    return row?.id ?? null;
+function normName(name: string): string {
+    return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 /**
- * Shu tanish + yo'nalishdagi ochiq qarz.
- * Ikkala tomon / borrowed|lent: kontakt nomi, contactId yoki linked peer orqali topiladi.
+ * Shu tanish bilan ochiq qarz.
+ * — kontakt id / ism (case-insensitive)
+ * — linked peer (ikkala tomon)
+ * — avvalo shu yo'nalish; bo'lmasa shu tanishdagi yagona ochiq qarz
  */
 export async function findOpenDebtId(
     ownerId: number,
@@ -340,41 +323,103 @@ export async function findOpenDebtId(
     direction: Direction,
     contactId?: number | null,
 ): Promise<number | null> {
-    const contact = contactId
-        ? ((await getContactById(contactId, ownerId)) ?? (await getOrCreateContact(ownerId, contactName)))
-        : await getOrCreateContact(ownerId, contactName);
+    const trimmed = contactName.trim().replace(/\s+/g, " ");
+    const needle = normName(trimmed);
 
-    const [byContact] = await db
-        .select({ id: debts.id })
-        .from(debts)
-        .where(
-            and(
-                eq(debts.owner_id, ownerId),
-                eq(debts.contact_id, contact.id),
-                eq(debts.direction, direction),
-                eq(debts.status, "open"),
-            ),
-        )
-        .orderBy(desc(debts.updated_at))
-        .limit(1);
-    if (byContact) return byContact.id;
+    const ownerContacts = await db.select().from(contacts).where(eq(contacts.owner_id, ownerId));
 
-    const peerUserId = await resolveContactLinkedUserId(contact);
-    if (!peerUserId || peerUserId === ownerId) return null;
+    const matched = ownerContacts.filter(
+        (c) => c.id === contactId || c.name === trimmed || normName(c.name) === needle,
+    );
 
-    // Shu peer bilan boshqa kontakt nomida ochiq qarz
-    const byPeer = await findOpenDebtWithPeer(ownerId, peerUserId, direction);
-    if (byPeer) return byPeer;
+    const contactIds = new Set(matched.map((c) => c.id));
+    const peerIds = new Set(
+        matched.map((c) => c.linked_user_id).filter((id): id is number => id != null && id !== ownerId),
+    );
 
-    // Peer tomonda ochiq juft qarz → bizdagi linked ochiq qarz
-    const peerOpenId = await findOpenDebtWithPeer(peerUserId, ownerId, flipDirection(direction));
-    if (!peerOpenId) return null;
-    const peerDebt = await getDebtById(peerOpenId);
-    if (!peerDebt?.linked_debt_id) return null;
-    const ours = await getDebtById(peerDebt.linked_debt_id);
-    if (ours && ours.owner_id === ownerId && ours.status === "open" && ours.direction === direction) {
-        return ours.id;
+    // Twin orqali linked_user_id tiklash
+    for (const c of matched) {
+        if (c.linked_user_id) continue;
+        const peer = await resolveContactLinkedUserId(c);
+        if (peer && peer !== ownerId) peerIds.add(peer);
     }
+
+    for (const c of ownerContacts) {
+        if (c.linked_user_id && peerIds.has(c.linked_user_id)) contactIds.add(c.id);
+    }
+
+    if (contactIds.size > 0) {
+        const openRows = await db
+            .select({
+                id: debts.id,
+                direction: debts.direction,
+                updated_at: debts.updated_at,
+            })
+            .from(debts)
+            .where(
+                and(
+                    eq(debts.owner_id, ownerId),
+                    eq(debts.status, "open"),
+                    inArray(debts.contact_id, [...contactIds]),
+                ),
+            )
+            .orderBy(desc(debts.updated_at));
+
+        const sameDir = openRows.find((r) => r.direction === direction);
+        if (sameDir) return sameDir.id;
+        // Shu tanishda faqat bitta ochiq qarz bo'lsa — yo'nalish farqi bilan ham shunga qo'sh
+        if (openRows.length === 1) return openRows[0].id;
+    }
+
+    // Peer akkauntdagi ochiq juft → bizdagi linked qarz
+    for (const peerUserId of peerIds) {
+        const peerOpenRows = await db
+            .select({
+                id: debts.id,
+                linked_debt_id: debts.linked_debt_id,
+                direction: debts.direction,
+            })
+            .from(debts)
+            .innerJoin(contacts, eq(contacts.id, debts.contact_id))
+            .where(
+                and(
+                    eq(debts.owner_id, peerUserId),
+                    eq(debts.status, "open"),
+                    eq(contacts.linked_user_id, ownerId),
+                ),
+            )
+            .orderBy(desc(debts.updated_at));
+
+        for (const peerDebt of peerOpenRows) {
+            if (!peerDebt.linked_debt_id) continue;
+            const ours = await getDebtById(peerDebt.linked_debt_id);
+            if (!ours || ours.owner_id !== ownerId) continue;
+            if (ours.status !== "open" && ours.status !== "closed") continue;
+            // Prefer matching flipped direction, else accept
+            if (ours.direction === direction || peerDebt.direction === flipDirection(direction)) {
+                return ours.id;
+            }
+        }
+
+        // Peer ochiq, bizda linked ochiq to'g'ridan
+        const oursDirect = await db
+            .select({ id: debts.id, direction: debts.direction })
+            .from(debts)
+            .innerJoin(contacts, eq(contacts.id, debts.contact_id))
+            .where(
+                and(
+                    eq(debts.owner_id, ownerId),
+                    eq(debts.status, "open"),
+                    eq(contacts.linked_user_id, peerUserId),
+                ),
+            )
+            .orderBy(desc(debts.updated_at));
+
+        const same = oursDirect.find((r) => r.direction === direction);
+        if (same) return same.id;
+        if (oursDirect.length === 1) return oursDirect[0].id;
+    }
+
     return null;
 }
 
@@ -424,25 +469,6 @@ export async function createDebt(params: {
         return mergeInto(openExistingId);
     }
 
-    // Peer tomonda ochiq juft qarz bor — bizdagi juftiga qo'sh (ikkala tomon / borrowed|lent)
-    const peerUserId = await resolveContactLinkedUserId(contact);
-    if (peerUserId && peerUserId !== params.ownerId) {
-        const peerOpenId = await findOpenDebtWithPeer(
-            peerUserId,
-            params.ownerId,
-            flipDirection(params.direction),
-        );
-        if (peerOpenId) {
-            const peerDebt = await getDebtById(peerOpenId);
-            if (peerDebt?.linked_debt_id) {
-                const ours = await getDebtById(peerDebt.linked_debt_id);
-                if (ours && ours.owner_id === params.ownerId && ours.direction === params.direction) {
-                    return mergeInto(ours.id);
-                }
-            }
-        }
-    }
-
     const [debt] = await db
         .insert(debts)
         .values({
@@ -462,6 +488,7 @@ export async function createDebt(params: {
         note: null,
     });
 
+    const peerUserId = await resolveContactLinkedUserId(contact);
     if (peerUserId && peerUserId !== params.ownerId) {
         const { ensureTwinDebt } = await import("./debt-link");
         await ensureTwinDebt(debt.id, peerUserId);
