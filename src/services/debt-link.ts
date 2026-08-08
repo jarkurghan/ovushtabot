@@ -69,14 +69,11 @@ export async function ensureTwinDebt(sourceDebtId: number, granteeId: number): P
         .set({ linked_user_id: source.owner_id })
         .where(eq(contacts.id, contact.id));
 
-    const [ownerContact] = await db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.id, source.contact_id))
-        .limit(1);
-    if (ownerContact && !ownerContact.linked_user_id) {
-        await db.update(contacts).set({ linked_user_id: granteeId }).where(eq(contacts.id, source.contact_id));
-    }
+    // Ikkala tomonda kontakt ↔ telegram user bog'lanishi saqlansin (keyingi qarzlar auto-twin)
+    await db
+        .update(contacts)
+        .set({ linked_user_id: granteeId })
+        .where(eq(contacts.id, source.contact_id));
 
     return getDebtById(twin.id);
 }

@@ -276,6 +276,26 @@ export async function listDebtsByContact(
     return enrichDebtRows(rows);
 }
 
+/** Kontakt avval ulashilgan bo'lsa — linked user; yo'q bo'lsa eski twin dan tiklaydi */
+async function resolveContactLinkedUserId(contact: typeof contacts.$inferSelect): Promise<number | null> {
+    if (contact.linked_user_id) return contact.linked_user_id;
+
+    const [row] = await db
+        .select({ linked_debt_id: debts.linked_debt_id })
+        .from(debts)
+        .where(and(eq(debts.contact_id, contact.id), sql`${debts.linked_debt_id} is not null`))
+        .orderBy(desc(debts.updated_at))
+        .limit(1);
+
+    if (!row?.linked_debt_id) return null;
+
+    const twin = await getDebtById(row.linked_debt_id);
+    if (!twin) return null;
+
+    await db.update(contacts).set({ linked_user_id: twin.owner_id }).where(eq(contacts.id, contact.id));
+    return twin.owner_id;
+}
+
 export async function createDebt(params: {
     ownerId: number;
     contactName: string;
@@ -304,6 +324,16 @@ export async function createDebt(params: {
         created_by: params.createdBy,
         note: null,
     });
+
+    // Avvalgi ulashish bo'lsa — yangi qarzni avtomatik twin qilish
+    const peerUserId = await resolveContactLinkedUserId(contact);
+    if (peerUserId && peerUserId !== params.ownerId) {
+        const { ensureTwinDebt } = await import("./debt-link");
+        await ensureTwinDebt(debt.id, peerUserId);
+    }
+
+    const created = await getDebtById(debt.id);
+    if (created) return created;
 
     return {
         id: debt.id,

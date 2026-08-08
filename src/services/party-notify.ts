@@ -93,14 +93,14 @@ export async function notifyDebtClosed(params: { debtId: number; actor: User }) 
 
 export async function notifyDebtCreated(params: { debt: DebtWithMeta; actor: User }) {
     const actorName = params.actor.first_name || "User";
-    const dirKey = params.debt.direction === "borrowed" ? "direction_borrowed" : "direction_lent";
 
-    await sendToParties(params.debt.id, params.actor.id, (user, debt) =>
-        t(user.language, "notify_debt_created", {
+    await sendToParties(params.debt.id, params.actor.id, (user, debt) => {
+        const dirKey = debt.direction === "borrowed" ? "direction_borrowed" : "direction_lent";
+        return t(user.language, "notify_debt_created", {
             actor: actorName,
             name: debt.contact_name,
             direction: t(user.language, dirKey),
             amount: formatAmount(debt.balance, user.language),
-        }),
-    );
+        });
+    });
 }
