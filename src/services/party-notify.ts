@@ -64,14 +64,27 @@ export async function notifyDebtItemAdded(params: {
     closed: boolean;
 }) {
     await sendToParties(params.debtId, params.actor.id, (user, debt) => {
-        const key = params.type === "repay" ? "notify_item_repay" : "notify_item_charge";
+        const lent = debt.direction === "lent";
+        const key =
+            params.type === "repay"
+                ? lent
+                    ? "notify_item_repay_lent"
+                    : "notify_item_repay_borrowed"
+                : lent
+                  ? "notify_item_charge_lent"
+                  : "notify_item_charge_borrowed";
+
         let text = t(user.language, key, {
             name: debt.contact_name,
             amount: formatAmount(params.amount, user.language),
-            balance: formatAmount(debt.balance, user.language),
         });
-        if (params.closed) {
-            text += `\n${t(user.language, "notify_debt_closed_auto", { name: debt.contact_name })}`;
+
+        if (params.closed && params.type === "repay") {
+            text += `\n${t(user.language, lent ? "notify_cleared_they_owe" : "notify_cleared_you_owe")}`;
+        } else {
+            text += `\n${t(user.language, "notify_remain", {
+                balance: formatAmount(debt.balance, user.language),
+            })}`;
         }
         return text;
     });
@@ -79,7 +92,7 @@ export async function notifyDebtItemAdded(params: {
 
 export async function notifyDebtClosed(params: { debtId: number; actor: User }) {
     await sendToParties(params.debtId, params.actor.id, (user, debt) =>
-        t(user.language, "notify_debt_closed", {
+        t(user.language, debt.direction === "lent" ? "notify_debt_closed_lent" : "notify_debt_closed_borrowed", {
             name: debt.contact_name,
         }),
     );
