@@ -120,6 +120,7 @@ export function contactDebtsKeyboard(
     } else {
         kb.text(t(lang, "open_debts"), `pdebts_${contactId}`).row();
     }
+    kb.text(t(lang, "edit_contact_name"), `rename_${contactId}`).row();
     kb.text(t(lang, "btn_back"), "people");
     return kb;
 }

@@ -131,6 +131,41 @@ export async function getContactById(contactId: number, ownerId: number) {
     return row ?? null;
 }
 
+export type RenameContactResult =
+    | { ok: true; contact: typeof contacts.$inferSelect }
+    | { ok: false; reason: "not_found" | "taken" | "invalid" };
+
+export async function renameContact(
+    contactId: number,
+    ownerId: number,
+    newName: string,
+): Promise<RenameContactResult> {
+    const trimmed = newName.trim().replace(/\s+/g, " ");
+    if (trimmed.length < 1 || trimmed.length > 80) {
+        return { ok: false, reason: "invalid" };
+    }
+
+    const contact = await getContactById(contactId, ownerId);
+    if (!contact) return { ok: false, reason: "not_found" };
+    if (contact.name === trimmed) return { ok: true, contact };
+
+    const [dup] = await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, trimmed)))
+        .limit(1);
+    if (dup) return { ok: false, reason: "taken" };
+
+    const [updated] = await db
+        .update(contacts)
+        .set({ name: trimmed })
+        .where(and(eq(contacts.id, contactId), eq(contacts.owner_id, ownerId)))
+        .returning();
+
+    if (!updated) return { ok: false, reason: "not_found" };
+    return { ok: true, contact: updated };
+}
+
 export type ContactSummary = {
     id: number;
     name: string;

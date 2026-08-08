@@ -55,7 +55,8 @@ export type SessionStep =
     | "set_due_date"
     | "share_waiting"
     | "notify_time"
-    | "browse_contacts";
+    | "browse_contacts"
+    | "rename_contact";
 
 export type SessionData = {
     step: SessionStep;

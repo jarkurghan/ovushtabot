@@ -9,6 +9,7 @@ import {
     onDueStart,
     onNotifyTimeMenu,
     onNotifyTimeSet,
+    onRenameContactStart,
     onRepayStart,
     onRevokeShare,
     onShareAllNew,
@@ -99,6 +100,11 @@ export async function registerCallbackRouter(ctx: CTX) {
 
         if (data.startsWith("pclosed_")) {
             await showContactDebts(ctx, Number(data.slice("pclosed_".length)), "closed");
+            return;
+        }
+
+        if (data.startsWith("rename_")) {
+            await onRenameContactStart(ctx, Number(data.slice("rename_".length)));
             return;
         }
 

@@ -31,6 +31,7 @@ import {
     listIncomingAccountShares,
     listOwnedDebts,
     listOutgoingAccountShares,
+    renameContact,
     resolveDebtAccess,
     revokeShare,
     setDueDate,
@@ -240,6 +241,34 @@ export async function showContactDebts(ctx: CTX, contactId: number, status: "ope
         }
     } catch (error) {
         await sendErrorLog({ event: "showContactDebts", error, ctx });
+    }
+}
+
+export async function onRenameContactStart(ctx: CTX, contactId: number) {
+    try {
+        const [user] = await saveUser(ctx);
+        if (!user) return;
+
+        const contact = await getContactById(contactId, user.id);
+        if (!contact) {
+            await ctx.answerCallbackQuery({ text: t(user.language, "no_permission") }).catch(() => undefined);
+            return;
+        }
+
+        setSession(ctx.from!.id, {
+            step: "rename_contact",
+            contactId,
+            browseContactId: contactId,
+            contactName: contact.name,
+        });
+
+        await ctx.answerCallbackQuery().catch(() => undefined);
+        await ctx.reply(t(user.language, "ask_rename_contact", { name: contact.name }), {
+            parse_mode: "HTML",
+            reply_markup: cancelKeyboard(user.language),
+        });
+    } catch (error) {
+        await sendErrorLog({ event: "onRenameContactStart", error, ctx });
     }
 }
 
@@ -725,6 +754,27 @@ export async function handleTextMessage(ctx: CTX) {
                 await showContactDebts(ctx, matched.id, "open");
                 return;
             }
+        }
+
+        if (session.step === "rename_contact" && session.contactId) {
+            const result = await renameContact(session.contactId, user.id, text);
+            if (!result.ok) {
+                if (result.reason === "taken") {
+                    await ctx.reply(t(lang, "contact_name_taken"), { reply_markup: cancelKeyboard(lang) });
+                    return;
+                }
+                await ctx.reply(`${t(lang, "ask_contact")}\n${t(lang, "contact_hint")}`, {
+                    reply_markup: cancelKeyboard(lang),
+                });
+                return;
+            }
+
+            const contactId = result.contact.id;
+            await ctx.reply(t(lang, "contact_renamed", { name: result.contact.name }), {
+                parse_mode: "HTML",
+            });
+            await showContactDebts(ctx, contactId, "open");
+            return;
         }
 
         if (text === t(lang, "btn_skip") || text === t("uz", "btn_skip") || text === t("cyrl", "btn_skip")) {
