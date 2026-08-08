@@ -14,8 +14,9 @@ import {
     formatItemsPreview,
     mainReplyKeyboard,
     notifyTimeKeyboard,
-    peopleBrowseKeyboard,
+    peopleListKeyboard,
     repayAmountKeyboard,
+    summaryKeyboard,
 } from "../services/keyboards";
 import {
     addDebtItem,
@@ -48,6 +49,19 @@ import {
     todayInTashkent,
 } from "../utils/format";
 import { sendErrorLog } from "../services/log";
+import { paginate } from "../utils/paginate";
+import type { InlineKeyboard } from "grammy";
+
+async function editOrReply(ctx: CTX, text: string, replyMarkup: InlineKeyboard) {
+    if (ctx.callbackQuery) {
+        await ctx.answerCallbackQuery().catch(() => undefined);
+        await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: replyMarkup }).catch(async () => {
+            await ctx.reply(text, { parse_mode: "HTML", reply_markup: replyMarkup });
+        });
+        return;
+    }
+    await ctx.reply(text, { parse_mode: "HTML", reply_markup: replyMarkup });
+}
 import {
     notifyDebtClosed,
     notifyDebtCreated,
@@ -305,12 +319,7 @@ export async function onDirection(ctx: CTX) {
 
         const known = await listContacts(user.id);
         if (known.length > 0) {
-            await ctx.reply(t(user.language, "ask_contact_pick"), {
-                reply_markup: contactPickerKeyboard(
-                    user.language,
-                    known.map((c) => ({ id: c.id, name: c.name })),
-                ),
-            });
+            await showContactPicker(ctx, 0);
             return;
         }
 
@@ -322,26 +331,115 @@ export async function onDirection(ctx: CTX) {
     }
 }
 
-export async function showPeopleList(ctx: CTX) {
+export async function showContactPicker(ctx: CTX, page = 0) {
+    try {
+        const [user] = await saveUser(ctx);
+        if (!user) return;
+        const session = getSession(ctx.from!.id);
+        if (!session.direction) {
+            clearSession(ctx.from!.id);
+            await ctx.reply(t(user.language, "cancelled"), { reply_markup: mainReplyKeyboard(user.language) });
+            return;
+        }
+
+        const known = await listContacts(user.id);
+        const { slice, page: p, totalPages, total } = paginate(known, page);
+        const suffix =
+            totalPages > 1 ? t(user.language, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
+        const text = `${t(user.language, "ask_contact_pick")} (${total})${suffix}`;
+        const markup = contactPickerKeyboard(
+            user.language,
+            slice.map((c) => ({ id: c.id, name: c.name })),
+            p,
+            totalPages,
+        );
+
+        if (ctx.callbackQuery) {
+            await ctx.answerCallbackQuery().catch(() => undefined);
+            await ctx.editMessageText(text, { reply_markup: markup }).catch(async () => {
+                await ctx.reply(text, { reply_markup: markup });
+            });
+        } else {
+            await ctx.reply(text, { reply_markup: markup });
+        }
+    } catch (error) {
+        await sendErrorLog({ event: "showContactPicker", error, ctx });
+    }
+}
+
+export async function onContactPick(ctx: CTX, contactId: number) {
+    try {
+        const [user] = await saveUser(ctx);
+        if (!user) return;
+        const session = getSession(ctx.from!.id);
+        if (!session.direction) {
+            await ctx.answerCallbackQuery({ text: t(user.language, "cancelled") }).catch(() => undefined);
+            return;
+        }
+
+        const contact = await getContactById(contactId, user.id);
+        if (!contact) {
+            await ctx.answerCallbackQuery({ text: t(user.language, "no_permission") }).catch(() => undefined);
+            return;
+        }
+
+        setSession(ctx.from!.id, {
+            step: "add_amount",
+            contactName: contact.name,
+            contactId: contact.id,
+            direction: session.direction,
+        });
+        await ctx.answerCallbackQuery().catch(() => undefined);
+        await ctx.deleteMessage().catch(() => undefined);
+        await ctx.reply(`${t(user.language, "ask_amount")}\n${t(user.language, "amount_hint")}`, {
+            reply_markup: cancelKeyboard(user.language),
+        });
+    } catch (error) {
+        await sendErrorLog({ event: "onContactPick", error, ctx });
+    }
+}
+
+export async function onContactPickNew(ctx: CTX) {
+    try {
+        const [user] = await saveUser(ctx);
+        if (!user) return;
+        const session = getSession(ctx.from!.id);
+        if (!session.direction) {
+            await ctx.answerCallbackQuery({ text: t(user.language, "cancelled") }).catch(() => undefined);
+            return;
+        }
+        setSession(ctx.from!.id, { step: "add_contact_name", direction: session.direction });
+        await ctx.answerCallbackQuery().catch(() => undefined);
+        await ctx.deleteMessage().catch(() => undefined);
+        await ctx.reply(`${t(user.language, "ask_contact_type")}\n${t(user.language, "contact_hint")}`, {
+            reply_markup: cancelKeyboard(user.language),
+        });
+    } catch (error) {
+        await sendErrorLog({ event: "onContactPickNew", error, ctx });
+    }
+}
+
+export async function showPeopleList(ctx: CTX, page = 0) {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
 
         const summaries = await listContactSummaries(user.id);
-        setSession(ctx.from!.id, { step: "browse_contacts", browseContactId: undefined });
-
-        if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => undefined);
+        setSession(ctx.from!.id, { step: "idle", browseContactId: undefined });
 
         if (!summaries.length) {
             clearSession(ctx.from!.id);
+            if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => undefined);
             await ctx.reply(t(user.language, "no_people"), { reply_markup: mainReplyKeyboard(user.language) });
             return;
         }
 
+        const { slice, page: p, totalPages, total } = paginate(summaries, page);
+        const suffix = totalPages > 1 ? t(user.language, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
         const lines = [
-            t(user.language, "people_title"),
+            `${t(user.language, "people_title")} (${total})${suffix}`,
             "",
-            ...summaries.map((s) =>
+            ...slice.map((s) =>
                 t(user.language, "people_summary_line", {
                     name: s.name,
                     borrowed: formatAmount(s.borrowedBalance, user.language),
@@ -350,19 +448,18 @@ export async function showPeopleList(ctx: CTX) {
             ),
         ];
 
-        await ctx.reply(lines.join("\n"), {
-            parse_mode: "HTML",
-            reply_markup: peopleBrowseKeyboard(
-                user.language,
-                summaries.map((s) => ({ name: s.name })),
-            ),
-        });
+        await editOrReply(ctx, lines.join("\n"), peopleListKeyboard(user.language, slice, p, totalPages));
     } catch (error) {
         await sendErrorLog({ event: "showPeopleList", error, ctx });
     }
 }
 
-export async function showContactDebts(ctx: CTX, contactId: number, status: "open" | "closed" = "open") {
+export async function showContactDebts(
+    ctx: CTX,
+    contactId: number,
+    status: "open" | "closed" = "open",
+    page = 0,
+) {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
@@ -374,35 +471,26 @@ export async function showContactDebts(ctx: CTX, contactId: number, status: "ope
         }
 
         setSession(ctx.from!.id, {
-            step: "browse_contacts",
+            step: "idle",
             browseContactId: contactId,
             contactId,
             contactName: contact.name,
         });
 
         const list = await listDebtsByContact(user.id, contactId, status);
+        const { slice, page: p, totalPages, total } = paginate(list, page);
         const title = t(user.language, "people_contact_debts", { name: contact.name });
-        const text = list.length
-            ? `${title}\n${status === "open" ? t(user.language, "open_debts") : t(user.language, "closed_debts")}: ${list.length}`
-            : `${title}\n${status === "open" ? t(user.language, "no_debts") : t(user.language, "closed_debts") + ": 0"}`;
+        const statusLabel = status === "open" ? t(user.language, "open_debts") : t(user.language, "closed_debts");
+        const suffix = totalPages > 1 ? t(user.language, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
+        const text = total
+            ? `${title}\n${statusLabel}: ${total}${suffix}`
+            : `${title}\n${status === "open" ? t(user.language, "no_debts") : `${statusLabel}: 0`}`;
 
-        if (ctx.callbackQuery) {
-            await ctx.answerCallbackQuery().catch(() => undefined);
-            await ctx.editMessageText(text, {
-                parse_mode: "HTML",
-                reply_markup: contactDebtsKeyboard(user.language, list, contactId, status),
-            }).catch(async () => {
-                await ctx.reply(text, {
-                    parse_mode: "HTML",
-                    reply_markup: contactDebtsKeyboard(user.language, list, contactId, status),
-                });
-            });
-        } else {
-            await ctx.reply(text, {
-                parse_mode: "HTML",
-                reply_markup: contactDebtsKeyboard(user.language, list, contactId, status),
-            });
-        }
+        await editOrReply(
+            ctx,
+            text,
+            contactDebtsKeyboard(user.language, slice, contactId, status, p, totalPages),
+        );
     } catch (error) {
         await sendErrorLog({ event: "showContactDebts", error, ctx });
     }
@@ -436,7 +524,7 @@ export async function onRenameContactStart(ctx: CTX, contactId: number) {
     }
 }
 
-export async function showDebtList(ctx: CTX, status: "open" | "closed" = "open") {
+export async function showDebtList(ctx: CTX, status: "open" | "closed" = "open", page = 0) {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
@@ -447,109 +535,87 @@ export async function showDebtList(ctx: CTX, status: "open" | "closed" = "open")
             browseContactId: undefined,
         });
 
-        if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => undefined);
+        const prefix = status === "open" ? ("debt" as const) : ("cdebt" as const);
+        const { slice, page: p, totalPages, total } = paginate(list, page);
 
-        const prefix = status === "open" ? "debt" : "cdebt";
-
-        if (!list.length) {
+        if (!total) {
             const text =
                 status === "open"
                     ? t(user.language, "no_debts")
-                    : t(user.language, "closed_debts") + ": 0";
-            const replyMarkup = debtListKeyboard(user.language, [], prefix);
-            if (ctx.callbackQuery) {
-                await ctx.editMessageText(text, {
-                    reply_markup: replyMarkup,
-                }).catch(async () => {
-                    await ctx.reply(text, { reply_markup: replyMarkup });
-                });
-            } else {
-                await ctx.reply(text, { reply_markup: replyMarkup });
-            }
+                    : `${t(user.language, "closed_debts")}: 0`;
+            await editOrReply(ctx, text, debtListKeyboard(user.language, [], prefix, 0, 1));
             return;
         }
 
         const title =
             status === "open" ? t(user.language, "open_debts") : t(user.language, "closed_debts");
-        const text = `<b>${title}</b> (${list.length})`;
+        const suffix =
+            totalPages > 1 ? t(user.language, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
+        const text = `<b>${title}</b> (${total})${suffix}`;
 
-        if (ctx.callbackQuery) {
-            await ctx.editMessageText(text, {
-                parse_mode: "HTML",
-                reply_markup: debtListKeyboard(user.language, list, prefix),
-            }).catch(async () => {
-                await ctx.reply(text, {
-                    parse_mode: "HTML",
-                    reply_markup: debtListKeyboard(user.language, list, prefix),
-                });
-            });
-        } else {
-            await ctx.reply(text, {
-                parse_mode: "HTML",
-                reply_markup: debtListKeyboard(user.language, list, prefix),
-            });
-        }
+        await editOrReply(ctx, text, debtListKeyboard(user.language, slice, prefix, p, totalPages));
     } catch (error) {
         await sendErrorLog({ event: "showDebtList", error, ctx });
     }
 }
 
-function formatSummarySection(lang: Lang, titleKey: string, list: DebtWithMeta[]): string {
-    const lines = [`<b>${t(lang, titleKey)}</b>`];
-    if (!list.length) {
-        lines.push(t(lang, "summary_empty"));
-        return lines.join("\n");
-    }
-
-    for (const d of list) {
+function buildSummaryLines(lang: Lang, list: DebtWithMeta[]): string[] {
+    return list.map((d) => {
         const amount = formatAmount(d.balance, lang);
         if (d.due_date) {
-            lines.push(
-                t(lang, "summary_line_due", {
-                    name: d.contact_name,
-                    amount,
-                    due: formatDate(d.due_date, lang),
-                }),
-            );
-        } else {
-            lines.push(t(lang, "summary_line", { name: d.contact_name, amount }));
+            return t(lang, "summary_line_due", {
+                name: d.contact_name,
+                amount,
+                due: formatDate(d.due_date, lang),
+            });
         }
-    }
-
-    const total = list.reduce((s, d) => s + d.balance, 0);
-    lines.push(t(lang, "summary_total", { amount: formatAmount(total, lang) }));
-    return lines.join("\n");
+        return t(lang, "summary_line", { name: d.contact_name, amount });
+    });
 }
 
-/** Ochiq qarzlar matnli hisoboti: olgan / bergan + jami */
-export async function showDebtSummary(ctx: CTX) {
+/** Ochiq qarzlar matnli hisoboti — sahifalangan */
+export async function showDebtSummary(ctx: CTX, page = 0) {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
+        const lang = user.language;
 
         const open = await listOwnedDebts(user.id, "open");
         const borrowed = open.filter((d) => d.direction === "borrowed");
         const lent = open.filter((d) => d.direction === "lent");
 
         if (!borrowed.length && !lent.length) {
-            await ctx.reply(t(user.language, "summary_none"), {
-                reply_markup: mainReplyKeyboard(user.language),
+            if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => undefined);
+            await ctx.reply(t(lang, "summary_none"), {
+                reply_markup: mainReplyKeyboard(lang),
             });
             return;
         }
 
-        const text = [
-            `<b>${t(user.language, "summary_title")}</b>`,
-            "",
-            formatSummarySection(user.language, "summary_borrowed", borrowed),
-            "",
-            formatSummarySection(user.language, "summary_lent", lent),
-        ].join("\n");
+        const borrowedTotal = borrowed.reduce((s, d) => s + d.balance, 0);
+        const lentTotal = lent.reduce((s, d) => s + d.balance, 0);
 
-        await ctx.reply(text, {
-            parse_mode: "HTML",
-            reply_markup: mainReplyKeyboard(user.language),
-        });
+        const blocks: string[] = [];
+        blocks.push(`<b>${t(lang, "summary_borrowed")}</b>`);
+        if (!borrowed.length) blocks.push(t(lang, "summary_empty"));
+        else {
+            blocks.push(...buildSummaryLines(lang, borrowed));
+            blocks.push(t(lang, "summary_total", { amount: formatAmount(borrowedTotal, lang) }));
+        }
+        blocks.push("");
+        blocks.push(`<b>${t(lang, "summary_lent")}</b>`);
+        if (!lent.length) blocks.push(t(lang, "summary_empty"));
+        else {
+            blocks.push(...buildSummaryLines(lang, lent));
+            blocks.push(t(lang, "summary_total", { amount: formatAmount(lentTotal, lang) }));
+        }
+
+        const { slice, page: p, totalPages } = paginate(blocks, page);
+        const suffix =
+            totalPages > 1 ? t(lang, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
+        const text = [`<b>${t(lang, "summary_title")}</b>${suffix}`, "", ...slice].join("\n");
+
+        await editOrReply(ctx, text, summaryKeyboard(lang, p, totalPages));
     } catch (error) {
         await sendErrorLog({ event: "showDebtSummary", error, ctx });
     }
@@ -795,24 +861,6 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         const session = getSession(ctx.from.id);
-
-        if (
-            session.step === "browse_contacts" &&
-            (text === t(lang, "btn_back") || text === t("uz", "btn_back") || text === t("cyrl", "btn_back"))
-        ) {
-            clearSession(ctx.from.id);
-            await ctx.reply(t(lang, "main_menu"), { reply_markup: mainReplyKeyboard(lang) });
-            return;
-        }
-
-        if (session.step === "browse_contacts") {
-            const known = await listContacts(user.id);
-            const matched = known.find((c) => c.name === text);
-            if (matched) {
-                await showContactDebts(ctx, matched.id, "open");
-                return;
-            }
-        }
 
         if (session.step === "rename_contact" && session.contactId) {
             const result = await renameContact(session.contactId, user.id, text);

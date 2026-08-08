@@ -1,8 +1,9 @@
 import { InlineKeyboard, Keyboard } from "grammy";
 import { t } from "../i18n";
 import type { Lang } from "../utils/types";
-import type { DebtWithMeta } from "./debts";
+import type { ContactSummary, DebtWithMeta } from "./debts";
 import { escapeHtml, formatAmount, formatDate } from "../utils/format";
+import { pageCallback } from "../utils/paginate";
 
 export function mainReplyKeyboard(lang: Lang) {
     return new Keyboard()
@@ -66,29 +67,69 @@ export function directionKeyboard(lang: Lang) {
         .text(t(lang, "btn_cancel"), "cancel");
 }
 
-export function contactPickerKeyboard(lang: Lang, contactsList: { id: number; name: string }[]) {
-    const kb = new Keyboard();
-    for (let i = 0; i < contactsList.length; i++) {
-        kb.text(contactsList[i].name.slice(0, 64));
-        if (i % 2 === 1 || i === contactsList.length - 1) kb.row();
+/** Sahifa navigatsiyasi: ‹ | 2/5 | › */
+export function appendPageNav(
+    kb: InlineKeyboard,
+    lang: Lang,
+    callbackPrefix: string,
+    page: number,
+    totalPages: number,
+): InlineKeyboard {
+    if (totalPages <= 1) return kb;
+    const label = t(lang, "page_of", { page: page + 1, total: totalPages });
+    if (page > 0) {
+        kb.text("‹", pageCallback(callbackPrefix, page - 1));
+    } else {
+        kb.text("·", "noop");
     }
-    kb.text(t(lang, "contact_new")).row();
-    kb.text(t(lang, "btn_cancel"));
-    return kb.resized().oneTime();
+    kb.text(label, "noop");
+    if (page < totalPages - 1) {
+        kb.text("›", pageCallback(callbackPrefix, page + 1));
+    } else {
+        kb.text("·", "noop");
+    }
+    return kb.row();
 }
 
-/** Tanishlar ro'yxati (browse) — custom keyboard */
-export function peopleBrowseKeyboard(lang: Lang, contactsList: { name: string }[]) {
-    const kb = new Keyboard();
-    for (let i = 0; i < contactsList.length; i++) {
-        kb.text(contactsList[i].name.slice(0, 64));
-        if (i % 2 === 1 || i === contactsList.length - 1) kb.row();
+export function contactPickerKeyboard(
+    lang: Lang,
+    contactsList: { id: number; name: string }[],
+    page: number,
+    totalPages: number,
+) {
+    const kb = new InlineKeyboard();
+    for (const c of contactsList) {
+        kb.text(c.name.slice(0, 60), `cpick_${c.id}`).row();
     }
-    kb.text(t(lang, "btn_back"));
-    return kb.resized().oneTime();
+    appendPageNav(kb, lang, "cpick", page, totalPages);
+    kb.text(t(lang, "contact_new"), "cpick_new").row();
+    kb.text(t(lang, "btn_cancel"), "cancel");
+    return kb;
 }
 
-export function debtListKeyboard(lang: Lang, list: DebtWithMeta[], prefix = "debt") {
+export function peopleListKeyboard(
+    lang: Lang,
+    contacts: ContactSummary[],
+    page: number,
+    totalPages: number,
+) {
+    const kb = new InlineKeyboard();
+    for (const c of contacts) {
+        const label = `${c.name}: 📥 ${formatAmount(c.borrowedBalance, lang)} / 📤 ${formatAmount(c.lentBalance, lang)}`;
+        kb.text(label.slice(0, 60), `pdebts_${c.id}`).row();
+    }
+    appendPageNav(kb, lang, "people", page, totalPages);
+    kb.text(t(lang, "btn_back"), "menu");
+    return kb;
+}
+
+export function debtListKeyboard(
+    lang: Lang,
+    list: DebtWithMeta[],
+    prefix: "debt" | "cdebt",
+    page: number,
+    totalPages: number,
+) {
     const kb = new InlineKeyboard();
     for (const d of list) {
         const arrow = d.direction === "borrowed" ? "📥" : "📤";
@@ -96,9 +137,11 @@ export function debtListKeyboard(lang: Lang, list: DebtWithMeta[], prefix = "deb
         const label = `${arrow} ${d.contact_name}: ${formatAmount(amount, lang)}`;
         kb.text(label.slice(0, 60), `debt_${d.id}`).row();
     }
+    const navPrefix = prefix === "debt" ? "list_open" : "list_closed";
+    appendPageNav(kb, lang, navPrefix, page, totalPages);
     if (prefix === "debt") {
         kb.text(t(lang, "view_closed"), "list_closed");
-    } else if (prefix === "cdebt") {
+    } else {
         kb.text(t(lang, "btn_back"), "list_open");
     }
     return kb;
@@ -109,6 +152,8 @@ export function contactDebtsKeyboard(
     list: DebtWithMeta[],
     contactId: number,
     status: "open" | "closed",
+    page: number,
+    totalPages: number,
 ) {
     const kb = new InlineKeyboard();
     for (const d of list) {
@@ -118,6 +163,8 @@ export function contactDebtsKeyboard(
         const label = `${arrow} ${formatAmount(amount, lang)}${due}`;
         kb.text(label.slice(0, 60), `debt_${d.id}`).row();
     }
+    const navPrefix = status === "open" ? `pdebts_${contactId}` : `pclosed_${contactId}`;
+    appendPageNav(kb, lang, navPrefix, page, totalPages);
     if (status === "open") {
         kb.text(t(lang, "view_closed"), `pclosed_${contactId}`).row();
     } else {
@@ -125,6 +172,13 @@ export function contactDebtsKeyboard(
     }
     kb.text(t(lang, "edit_contact_name"), `rename_${contactId}`).row();
     kb.text(t(lang, "btn_back"), "people");
+    return kb;
+}
+
+export function summaryKeyboard(lang: Lang, page: number, totalPages: number) {
+    const kb = new InlineKeyboard();
+    appendPageNav(kb, lang, "summary", page, totalPages);
+    kb.text(t(lang, "btn_back"), "menu");
     return kb;
 }
 

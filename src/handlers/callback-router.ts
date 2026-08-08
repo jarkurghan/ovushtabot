@@ -4,6 +4,8 @@ import {
     handleTextMessage,
     onChargeStart,
     onCloseDebt,
+    onContactPick,
+    onContactPickNew,
     onDirection,
     onDueStart,
     onNotifyTimeMenu,
@@ -12,8 +14,10 @@ import {
     onRepayStart,
     onShareStart,
     showContactDebts,
+    showContactPicker,
     showDebtDetail,
     showDebtList,
+    showDebtSummary,
     showPeopleList,
     startAddDebt,
 } from "./action-debts";
@@ -24,11 +28,17 @@ import {
     showMainMenu,
     showSettings,
 } from "./action-settings";
+import { parsePageCallback } from "../utils/paginate";
 
 export async function registerCallbackRouter(ctx: CTX) {
     try {
         const data = ctx.callbackQuery?.data;
         if (!data) return;
+
+        if (data === "noop") {
+            await ctx.answerCallbackQuery().catch(() => undefined);
+            return;
+        }
 
         if (data === "cancel") {
             await ctx.answerCallbackQuery().catch(() => undefined);
@@ -54,29 +64,80 @@ export async function registerCallbackRouter(ctx: CTX) {
             return;
         }
 
-        if (data === "list_open") {
-            await showDebtList(ctx, "open");
+        if (data === "list_open" || data.startsWith("list_open_p")) {
+            const page = data === "list_open" ? 0 : (parsePageCallback(data)?.page ?? 0);
+            await showDebtList(ctx, "open", page);
             return;
         }
 
-        if (data === "list_closed") {
-            await showDebtList(ctx, "closed");
+        if (data === "list_closed" || data.startsWith("list_closed_p")) {
+            const page = data === "list_closed" ? 0 : (parsePageCallback(data)?.page ?? 0);
+            await showDebtList(ctx, "closed", page);
             return;
         }
 
-        if (data === "people") {
-            await showPeopleList(ctx);
+        if (data === "people" || data.startsWith("people_p")) {
+            const page = data === "people" ? 0 : (parsePageCallback(data)?.page ?? 0);
+            await showPeopleList(ctx, page);
             return;
         }
 
+        if (data === "summary" || data.startsWith("summary_p")) {
+            const page = data === "summary" ? 0 : (parsePageCallback(data)?.page ?? 0);
+            await showDebtSummary(ctx, page);
+            return;
+        }
+
+        if (data === "cpick_new") {
+            await onContactPickNew(ctx);
+            return;
+        }
+
+        if (data === "cpick" || data.startsWith("cpick_p")) {
+            const page = data === "cpick" ? 0 : (parsePageCallback(data)?.page ?? 0);
+            await showContactPicker(ctx, page);
+            return;
+        }
+
+        if (data.startsWith("cpick_")) {
+            const id = Number(data.slice("cpick_".length));
+            if (Number.isFinite(id)) {
+                await onContactPick(ctx, id);
+                return;
+            }
+        }
+
+        // pdebts_{id} | pdebts_{id}_p{N}
         if (data.startsWith("pdebts_")) {
-            await showContactDebts(ctx, Number(data.slice("pdebts_".length)), "open");
-            return;
+            const paged = parsePageCallback(data);
+            if (paged?.base.startsWith("pdebts_")) {
+                const id = Number(paged.base.slice("pdebts_".length));
+                if (Number.isFinite(id)) {
+                    await showContactDebts(ctx, id, "open", paged.page);
+                    return;
+                }
+            }
+            const id = Number(data.slice("pdebts_".length));
+            if (Number.isFinite(id)) {
+                await showContactDebts(ctx, id, "open", 0);
+                return;
+            }
         }
 
         if (data.startsWith("pclosed_")) {
-            await showContactDebts(ctx, Number(data.slice("pclosed_".length)), "closed");
-            return;
+            const paged = parsePageCallback(data);
+            if (paged?.base.startsWith("pclosed_")) {
+                const id = Number(paged.base.slice("pclosed_".length));
+                if (Number.isFinite(id)) {
+                    await showContactDebts(ctx, id, "closed", paged.page);
+                    return;
+                }
+            }
+            const id = Number(data.slice("pclosed_".length));
+            if (Number.isFinite(id)) {
+                await showContactDebts(ctx, id, "closed", 0);
+                return;
+            }
         }
 
         if (data.startsWith("rename_")) {
