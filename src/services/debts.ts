@@ -174,22 +174,48 @@ export type ContactSummary = {
     openCount: number;
 };
 
-/** Tanishlar + ochiq qarz qoldiqlari */
+/** Tanishlar + tarixdagi jami (barcha charge'lar yig'indisi, ochiq/yopiq) */
 export async function listContactSummaries(ownerId: number): Promise<ContactSummary[]> {
     const known = await listContacts(ownerId);
     if (!known.length) return [];
 
-    const openDebts = await listOwnedDebts(ownerId, "open");
-    return known.map((c) => {
-        const related = openDebts.filter((d) => d.contact_id === c.id);
-        return {
-            id: c.id,
-            name: c.name,
-            borrowedBalance: related.filter((d) => d.direction === "borrowed").reduce((s, d) => s + d.balance, 0),
-            lentBalance: related.filter((d) => d.direction === "lent").reduce((s, d) => s + d.balance, 0),
-            openCount: related.length,
-        };
-    });
+    const totals = await db
+        .select({
+            contact_id: debts.contact_id,
+            direction: debts.direction,
+            total: sql<number>`coalesce(sum(case when ${debtItems.type} = 'charge' then ${debtItems.amount} else 0 end), 0)`.mapWith(
+                Number,
+            ),
+        })
+        .from(debts)
+        .leftJoin(debtItems, eq(debtItems.debt_id, debts.id))
+        .where(eq(debts.owner_id, ownerId))
+        .groupBy(debts.contact_id, debts.direction);
+
+    const openCounts = await db
+        .select({
+            contact_id: debts.contact_id,
+            count: sql<number>`count(*)`.mapWith(Number),
+        })
+        .from(debts)
+        .where(and(eq(debts.owner_id, ownerId), eq(debts.status, "open")))
+        .groupBy(debts.contact_id);
+
+    const borrowedByContact = new Map<number, number>();
+    const lentByContact = new Map<number, number>();
+    for (const row of totals) {
+        if (row.direction === "borrowed") borrowedByContact.set(row.contact_id, row.total);
+        else if (row.direction === "lent") lentByContact.set(row.contact_id, row.total);
+    }
+    const openByContact = new Map(openCounts.map((r) => [r.contact_id, r.count]));
+
+    return known.map((c) => ({
+        id: c.id,
+        name: c.name,
+        borrowedBalance: borrowedByContact.get(c.id) ?? 0,
+        lentBalance: lentByContact.get(c.id) ?? 0,
+        openCount: openByContact.get(c.id) ?? 0,
+    }));
 }
 
 export async function listDebtsByContact(
