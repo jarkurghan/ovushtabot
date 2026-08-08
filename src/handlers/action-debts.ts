@@ -75,17 +75,26 @@ function resolveDuePreset(text: string, lang: Lang): string | null {
 
 async function notifyAfterDebtCreate(result: CreateDebtResult, actor: User) {
     if (result.merged) {
+        if (result.amount <= 0) return;
         await notifyDebtItemAdded({
             debtId: result.debt.id,
             actor,
-            type: "charge",
+            type: result.mergeType === "repay" ? "repay" : "charge",
             amount: result.amount,
             balance: result.debt.balance,
-            closed: false,
+            closed: !!result.closed,
         });
         return;
     }
     await notifyDebtCreated({ debt: result.debt, actor });
+}
+
+function titleAfterDebtCreate(lang: Lang, result: CreateDebtResult): string {
+    if (!result.merged) return t(lang, "debt_created");
+    if (result.mergeType === "repay") {
+        return result.closed ? `${t(lang, "repaid")}\n${t(lang, "remain_zero_closed")}` : t(lang, "repaid");
+    }
+    return t(lang, "charged");
 }
 
 async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
@@ -796,9 +805,8 @@ export async function handleTextMessage(ctx: CTX) {
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
-                const title = result.merged ? t(lang, "charged") : t(lang, "debt_created");
                 await ctx.reply(
-                    `${title}\n\n${formatDebtCard(lang, result.debt)}`,
+                    `${titleAfterDebtCreate(lang, result)}\n\n${formatDebtCard(lang, result.debt)}`,
                     { parse_mode: "HTML", reply_markup: mainReplyKeyboard(lang) },
                 );
                 return;
@@ -858,13 +866,11 @@ export async function handleTextMessage(ctx: CTX) {
             }
 
             const ownerId = session.asOwnerId || user.id;
-            // Ochiq qarz bor (ikkala tomon / borrowed|lent) — sana so'ralmasin
-            const openId = await findOpenDebtId(
-                ownerId,
-                session.contactName,
-                session.direction,
-                session.contactId,
-            );
+            const oppositeDir = session.direction === "borrowed" ? "lent" : "borrowed";
+            // Bir xil yoki teskari ochiq qarz bor — sana so'ralmasin (charge yoki repay)
+            const openId =
+                (await findOpenDebtId(ownerId, session.contactName, session.direction, session.contactId)) ??
+                (await findOpenDebtId(ownerId, session.contactName, oppositeDir, session.contactId));
             if (openId) {
                 const result = await createDebt({
                     ownerId,
@@ -877,10 +883,13 @@ export async function handleTextMessage(ctx: CTX) {
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
-                await ctx.reply(`${t(lang, "charged")}\n\n${formatDebtCard(lang, result.debt)}`, {
-                    parse_mode: "HTML",
-                    reply_markup: mainReplyKeyboard(lang),
-                });
+                await ctx.reply(
+                    `${titleAfterDebtCreate(lang, result)}\n\n${formatDebtCard(lang, result.debt)}`,
+                    {
+                        parse_mode: "HTML",
+                        reply_markup: mainReplyKeyboard(lang),
+                    },
+                );
                 return;
             }
 
@@ -921,11 +930,13 @@ export async function handleTextMessage(ctx: CTX) {
             });
             clearSession(ctx.from.id);
             await notifyAfterDebtCreate(result, user);
-            const title = result.merged ? t(lang, "charged") : t(lang, "debt_created");
-            await ctx.reply(`${title}\n\n${formatDebtCard(lang, result.debt)}`, {
-                parse_mode: "HTML",
-                reply_markup: mainReplyKeyboard(lang),
-            });
+            await ctx.reply(
+                `${titleAfterDebtCreate(lang, result)}\n\n${formatDebtCard(lang, result.debt)}`,
+                {
+                    parse_mode: "HTML",
+                    reply_markup: mainReplyKeyboard(lang),
+                },
+            );
             return;
         }
 

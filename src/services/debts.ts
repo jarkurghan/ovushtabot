@@ -298,9 +298,12 @@ async function resolveContactLinkedUserId(contact: typeof contacts.$inferSelect)
 
 export type CreateDebtResult = {
     debt: DebtWithMeta;
-    /** Mavjud ochiq qarzga charge sifatida qo'shildi */
+    /** Mavjud ochiq qarzga qo'shildi (bir xil yo'nalish) yoki qaytarish (teskari) */
     merged: boolean;
+    /** bir xil yo'nalish → charge; teskari → repay (qarz kamayadi, yangi qarz ochilmaydi) */
+    mergeType?: "charge" | "repay";
     amount: number;
+    closed?: boolean;
 };
 
 function flipDirection(direction: Direction): Direction {
@@ -420,36 +423,66 @@ export async function createDebt(params: {
           (await getOrCreateContact(params.ownerId, params.contactName)))
         : await getOrCreateContact(params.ownerId, params.contactName);
 
-    // Shu tanish + yo'nalishda ochiq qarz bo'lsa — yangi qarz emas, item (twin sync addDebtItem da)
-    const openExistingId = await findOpenDebtId(
+    // Bir xil yo'nalishdagi ochiq qarz → charge; teskari ochiq qarz → repay (yangisi ochilmaydi)
+    const sameDirId = await findOpenDebtId(
         params.ownerId,
         params.contactName,
         params.direction,
         contact.id,
     );
+    const oppositeDirId = sameDirId
+        ? null
+        : await findOpenDebtId(
+              params.ownerId,
+              params.contactName,
+              flipDirection(params.direction),
+              contact.id,
+          );
 
-    const mergeInto = async (debtId: number): Promise<CreateDebtResult> => {
+    const applyToExisting = async (
+        debtId: number,
+        type: "charge" | "repay",
+    ): Promise<CreateDebtResult> => {
         const existing = await getDebtById(debtId);
         if (!existing) throw new Error("createDebt merge: debt missing");
         if (existing.status === "closed") {
             await db.update(debts).set({ status: "open" }).where(eq(debts.id, debtId));
         }
-        await addDebtItem({
+
+        let amount = params.amount;
+        if (type === "repay") {
+            const bal = existing.balance > 0 ? existing.balance : 0;
+            amount = Math.min(params.amount, bal);
+            if (amount <= 0) {
+                return { debt: existing, merged: true, mergeType: "repay", amount: 0, closed: true };
+            }
+        }
+
+        const result = await addDebtItem({
             debtId,
-            type: "charge",
-            amount: params.amount,
+            type,
+            amount,
             createdBy: params.createdBy,
         });
-        if (params.dueDate) {
+        if (type === "charge" && params.dueDate) {
             await setDueDate(debtId, params.dueDate);
         }
         const debt = await getDebtById(debtId);
-        if (!debt) throw new Error("createDebt merge: debt missing after charge");
-        return { debt, merged: true, amount: params.amount };
+        if (!debt) throw new Error("createDebt merge: debt missing after item");
+        return {
+            debt,
+            merged: true,
+            mergeType: type,
+            amount,
+            closed: result.closed,
+        };
     };
 
-    if (openExistingId) {
-        return mergeInto(openExistingId);
+    if (sameDirId) {
+        return applyToExisting(sameDirId, "charge");
+    }
+    if (oppositeDirId) {
+        return applyToExisting(oppositeDirId, "repay");
     }
 
     const [debt] = await db
