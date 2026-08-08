@@ -23,6 +23,7 @@ import {
     closeDebt,
     createDebt,
     createShareInvite,
+    findOpenDebtId,
     getContactById,
     getDebtById,
     getDebtItems,
@@ -838,6 +839,33 @@ export async function handleTextMessage(ctx: CTX) {
                 await ctx.reply(t(lang, "invalid_amount"));
                 return;
             }
+            if (!session.direction || !session.contactName) {
+                clearSession(ctx.from.id);
+                await ctx.reply(t(lang, "cancelled"), { reply_markup: mainReplyKeyboard(lang) });
+                return;
+            }
+
+            const ownerId = session.asOwnerId || user.id;
+            // Ochiq qarz bor — sana so'ralmasin, darhol item qo'shilsin
+            const openId = await findOpenDebtId(ownerId, session.contactName, session.direction);
+            if (openId) {
+                const result = await createDebt({
+                    ownerId,
+                    contactName: session.contactName,
+                    direction: session.direction,
+                    amount,
+                    dueDate: null,
+                    createdBy: user.id,
+                });
+                clearSession(ctx.from.id);
+                await notifyAfterDebtCreate(result, user);
+                await ctx.reply(`${t(lang, "charged")}\n\n${formatDebtCard(lang, result.debt)}`, {
+                    parse_mode: "HTML",
+                    reply_markup: mainReplyKeyboard(lang),
+                });
+                return;
+            }
+
             setSession(ctx.from.id, {
                 step: "add_due_date",
                 amount,

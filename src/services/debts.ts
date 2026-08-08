@@ -303,6 +303,29 @@ export type CreateDebtResult = {
     amount: number;
 };
 
+/** Shu tanish + yo'nalishdagi ochiq qarz id (yo'q bo'lsa null) */
+export async function findOpenDebtId(
+    ownerId: number,
+    contactName: string,
+    direction: Direction,
+): Promise<number | null> {
+    const contact = await getOrCreateContact(ownerId, contactName);
+    const [row] = await db
+        .select({ id: debts.id })
+        .from(debts)
+        .where(
+            and(
+                eq(debts.owner_id, ownerId),
+                eq(debts.contact_id, contact.id),
+                eq(debts.direction, direction),
+                eq(debts.status, "open"),
+            ),
+        )
+        .orderBy(desc(debts.updated_at))
+        .limit(1);
+    return row?.id ?? null;
+}
+
 export async function createDebt(params: {
     ownerId: number;
     contactName: string;
@@ -314,19 +337,8 @@ export async function createDebt(params: {
     const contact = await getOrCreateContact(params.ownerId, params.contactName);
 
     // Shu tanish + yo'nalishda ochiq qarz bo'lsa — yangi qarz emas, item
-    const [openExisting] = await db
-        .select({ id: debts.id })
-        .from(debts)
-        .where(
-            and(
-                eq(debts.owner_id, params.ownerId),
-                eq(debts.contact_id, contact.id),
-                eq(debts.direction, params.direction),
-                eq(debts.status, "open"),
-            ),
-        )
-        .orderBy(desc(debts.updated_at))
-        .limit(1);
+    const openExistingId = await findOpenDebtId(params.ownerId, params.contactName, params.direction);
+    const openExisting = openExistingId ? { id: openExistingId } : null;
 
     if (openExisting) {
         await addDebtItem({
