@@ -272,43 +272,26 @@ export async function onRenameContactStart(ctx: CTX, contactId: number) {
     }
 }
 
-export async function showDebtList(
-    ctx: CTX,
-    status: "open" | "closed" = "open",
-    mode: "all" | "lent" = "all",
-) {
+export async function showDebtList(ctx: CTX, status: "open" | "closed" = "open") {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
 
-        const direction = mode === "lent" ? "lent" : undefined;
-        const list = await listOwnedDebts(user.id, status, direction);
+        const list = await listOwnedDebts(user.id, status);
         setSession(ctx.from!.id, {
             step: "idle",
-            listMode: mode,
             browseContactId: undefined,
         });
 
         if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => undefined);
 
-        const prefix =
-            mode === "lent"
-                ? status === "open"
-                    ? "ldebt"
-                    : "cldebt"
-                : status === "open"
-                  ? "debt"
-                  : "cdebt";
+        const prefix = status === "open" ? "debt" : "cdebt";
 
         if (!list.length) {
             const text =
-                mode === "lent"
-                    ? status === "open"
-                        ? t(user.language, "no_lent_debts")
-                        : t(user.language, "closed_debts") + ": 0"
-                    : status === "open"
-                      ? t(user.language, "no_debts")
-                      : t(user.language, "closed_debts") + ": 0";
+                status === "open"
+                    ? t(user.language, "no_debts")
+                    : t(user.language, "closed_debts") + ": 0";
             if (ctx.callbackQuery) {
                 await ctx.editMessageText(text, {
                     reply_markup: debtListKeyboard(user.language, [], prefix),
@@ -322,13 +305,7 @@ export async function showDebtList(
         }
 
         const title =
-            mode === "lent"
-                ? status === "open"
-                    ? t(user.language, "lent_debts")
-                    : t(user.language, "closed_debts")
-                : status === "open"
-                  ? t(user.language, "open_debts")
-                  : t(user.language, "closed_debts");
+            status === "open" ? t(user.language, "open_debts") : t(user.language, "closed_debts");
         const text = `<b>${title}</b> (${list.length})`;
 
         if (ctx.callbackQuery) {
@@ -431,9 +408,7 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
         const backCallback =
             session.browseContactId && session.browseContactId === debt.contact_id
                 ? `pdebts_${debt.contact_id}`
-                : session.listMode === "lent"
-                  ? "list_lent"
-                  : "list_open";
+                : "list_open";
 
         const items = await getDebtItems(debtId);
         const preview = formatItemsPreview(user.language, items);
@@ -709,11 +684,7 @@ export async function handleTextMessage(ctx: CTX) {
             return;
         }
         if (text === t(lang, "btn_list") || text === t("uz", "btn_list") || text === t("cyrl", "btn_list")) {
-            await showDebtList(ctx, "open", "all");
-            return;
-        }
-        if (text === t(lang, "btn_lent") || text === t("uz", "btn_lent") || text === t("cyrl", "btn_lent")) {
-            await showDebtList(ctx, "open", "lent");
+            await showDebtList(ctx, "open");
             return;
         }
         if (text === t(lang, "btn_people") || text === t("uz", "btn_people") || text === t("cyrl", "btn_people")) {

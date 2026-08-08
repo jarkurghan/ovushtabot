@@ -9,10 +9,9 @@ export function mainReplyKeyboard(lang: Lang) {
         .text(t(lang, "btn_add"))
         .text(t(lang, "btn_list"))
         .row()
-        .text(t(lang, "btn_lent"))
         .text(t(lang, "btn_people"))
-        .row()
         .text(t(lang, "btn_summary"))
+        .row()
         .text(t(lang, "btn_settings"))
         .resized()
         .persistent();
@@ -84,20 +83,13 @@ export function debtListKeyboard(lang: Lang, list: DebtWithMeta[], prefix = "deb
     const kb = new InlineKeyboard();
     for (const d of list) {
         const arrow = d.direction === "borrowed" ? "📥" : "📤";
-        const label =
-            prefix === "ldebt" || prefix === "cldebt"
-                ? `📤 ${d.contact_name}: ${formatAmount(d.balance, lang)}`
-                : `${arrow} ${d.contact_name}: ${formatAmount(d.balance, lang)}`;
+        const label = `${arrow} ${d.contact_name}: ${formatAmount(d.balance, lang)}`;
         kb.text(label.slice(0, 60), `debt_${d.id}`).row();
     }
     if (prefix === "debt") {
         kb.text(t(lang, "view_closed"), "list_closed");
     } else if (prefix === "cdebt") {
         kb.text(t(lang, "btn_back"), "list_open");
-    } else if (prefix === "ldebt") {
-        kb.text(t(lang, "view_closed"), "list_lent_closed");
-    } else if (prefix === "cldebt") {
-        kb.text(t(lang, "btn_back"), "list_lent");
     }
     return kb;
 }
