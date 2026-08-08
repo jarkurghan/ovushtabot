@@ -63,12 +63,9 @@ export async function notifyDebtItemAdded(params: {
     balance: number;
     closed: boolean;
 }) {
-    const actorName = params.actor.first_name || "User";
-
     await sendToParties(params.debtId, params.actor.id, (user, debt) => {
         const key = params.type === "repay" ? "notify_item_repay" : "notify_item_charge";
         let text = t(user.language, key, {
-            actor: actorName,
             name: debt.contact_name,
             amount: formatAmount(params.amount, user.language),
             balance: formatAmount(debt.balance, user.language),
@@ -81,23 +78,17 @@ export async function notifyDebtItemAdded(params: {
 }
 
 export async function notifyDebtClosed(params: { debtId: number; actor: User }) {
-    const actorName = params.actor.first_name || "User";
-
     await sendToParties(params.debtId, params.actor.id, (user, debt) =>
         t(user.language, "notify_debt_closed", {
-            actor: actorName,
             name: debt.contact_name,
         }),
     );
 }
 
 export async function notifyDebtCreated(params: { debt: DebtWithMeta; actor: User }) {
-    const actorName = params.actor.first_name || "User";
-
     await sendToParties(params.debt.id, params.actor.id, (user, debt) => {
         const dirKey = debt.direction === "borrowed" ? "direction_borrowed" : "direction_lent";
         return t(user.language, "notify_debt_created", {
-            actor: actorName,
             name: debt.contact_name,
             direction: t(user.language, dirKey),
             amount: formatAmount(debt.balance, user.language),
@@ -110,17 +101,13 @@ export async function notifyDebtDueChanged(params: {
     actor: User;
     dueDate: string | null;
 }) {
-    const actorName = params.actor.first_name || "User";
-
     await sendToParties(params.debtId, params.actor.id, (user, debt) => {
         if (!params.dueDate) {
             return t(user.language, "notify_due_cleared", {
-                actor: actorName,
                 name: debt.contact_name,
             });
         }
         return t(user.language, "notify_due_set", {
-            actor: actorName,
             name: debt.contact_name,
             due: formatDate(params.dueDate, user.language),
         });
