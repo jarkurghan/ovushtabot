@@ -21,6 +21,15 @@ export function cancelKeyboard(lang: Lang) {
     return new Keyboard().text(t(lang, "btn_cancel")).resized().oneTime();
 }
 
+export function repayAmountKeyboard(lang: Lang) {
+    return new Keyboard()
+        .text(t(lang, "btn_repay_all"))
+        .row()
+        .text(t(lang, "btn_cancel"))
+        .resized()
+        .oneTime();
+}
+
 export function cancelSkipKeyboard(lang: Lang) {
     return new Keyboard().text(t(lang, "btn_skip")).row().text(t(lang, "btn_cancel")).resized().oneTime();
 }

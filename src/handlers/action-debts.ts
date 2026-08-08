@@ -15,6 +15,7 @@ import {
     mainReplyKeyboard,
     notifyTimeKeyboard,
     peopleBrowseKeyboard,
+    repayAmountKeyboard,
     sharesListKeyboard,
 } from "../services/keyboards";
 import {
@@ -466,7 +467,7 @@ export async function onRepayStart(ctx: CTX, debtId: number) {
         }
         setSession(ctx.from!.id, { step: "repay_amount", debtId });
         await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.reply(t(user.language, "ask_repay"), { reply_markup: cancelKeyboard(user.language) });
+        await ctx.reply(t(user.language, "ask_repay"), { reply_markup: repayAmountKeyboard(user.language) });
     } catch (error) {
         await sendErrorLog({ event: "onRepayStart", error, ctx });
     }
@@ -863,26 +864,38 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         if (session.step === "repay_amount" && session.debtId) {
-            const amount = parseAmount(text);
-            if (!amount) {
-                await ctx.reply(t(lang, "invalid_amount"));
-                return;
-            }
             const access = await resolveDebtAccess(user, session.debtId);
             if (!access.canWrite) {
                 clearSession(ctx.from.id);
                 await ctx.reply(t(lang, "write_denied"), { reply_markup: mainReplyKeyboard(lang) });
                 return;
             }
+
+            const isAll =
+                text === t(lang, "btn_repay_all") ||
+                text === t("uz", "btn_repay_all") ||
+                text === t("cyrl", "btn_repay_all");
+
+            let amount = parseAmount(text);
+            if (isAll) {
+                const debt = await getDebtById(session.debtId);
+                amount = debt && debt.balance > 0 ? debt.balance : null;
+            }
+            if (!amount) {
+                await ctx.reply(t(lang, "invalid_amount"), { reply_markup: repayAmountKeyboard(lang) });
+                return;
+            }
+
+            const debtId = session.debtId;
             const result = await addDebtItem({
-                debtId: session.debtId,
+                debtId,
                 type: "repay",
                 amount,
                 createdBy: user.id,
             });
             clearSession(ctx.from.id);
             await notifyDebtItemAdded({
-                debtId: session.debtId,
+                debtId,
                 actor: user,
                 type: "repay",
                 amount,
