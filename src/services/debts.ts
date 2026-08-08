@@ -312,10 +312,8 @@ function normName(name: string): string {
 }
 
 /**
- * Shu tanish bilan ochiq qarz.
- * — kontakt id / ism (case-insensitive)
- * — linked peer (ikkala tomon)
- * — avvalo shu yo'nalish; bo'lmasa shu tanishdagi yagona ochiq qarz
+ * Shu tanish + SHU yo'nalishdagi ochiq qarz (merge uchun).
+ * Teskari yo'nalish (oldim vs berdim) hech qachon birlashtirilmaydi.
  */
 export async function findOpenDebtId(
     ownerId: number,
@@ -337,7 +335,6 @@ export async function findOpenDebtId(
         matched.map((c) => c.linked_user_id).filter((id): id is number => id != null && id !== ownerId),
     );
 
-    // Twin orqali linked_user_id tiklash
     for (const c of matched) {
         if (c.linked_user_id) continue;
         const peer = await resolveContactLinkedUserId(c);
@@ -349,42 +346,49 @@ export async function findOpenDebtId(
     }
 
     if (contactIds.size > 0) {
-        const openRows = await db
-            .select({
-                id: debts.id,
-                direction: debts.direction,
-                updated_at: debts.updated_at,
-            })
+        const [sameDir] = await db
+            .select({ id: debts.id })
             .from(debts)
             .where(
                 and(
                     eq(debts.owner_id, ownerId),
                     eq(debts.status, "open"),
+                    eq(debts.direction, direction),
                     inArray(debts.contact_id, [...contactIds]),
                 ),
             )
-            .orderBy(desc(debts.updated_at));
-
-        const sameDir = openRows.find((r) => r.direction === direction);
+            .orderBy(desc(debts.updated_at))
+            .limit(1);
         if (sameDir) return sameDir.id;
-        // Shu tanishda faqat bitta ochiq qarz bo'lsa — yo'nalish farqi bilan ham shunga qo'sh
-        if (openRows.length === 1) return openRows[0].id;
     }
 
-    // Peer akkauntdagi ochiq juft → bizdagi linked qarz
+    // Peer twin orqali — faqat o'z tomonda shu yo'nalishdagi juft
     for (const peerUserId of peerIds) {
+        const [oursDirect] = await db
+            .select({ id: debts.id })
+            .from(debts)
+            .innerJoin(contacts, eq(contacts.id, debts.contact_id))
+            .where(
+                and(
+                    eq(debts.owner_id, ownerId),
+                    eq(debts.status, "open"),
+                    eq(debts.direction, direction),
+                    eq(contacts.linked_user_id, peerUserId),
+                ),
+            )
+            .orderBy(desc(debts.updated_at))
+            .limit(1);
+        if (oursDirect) return oursDirect.id;
+
         const peerOpenRows = await db
-            .select({
-                id: debts.id,
-                linked_debt_id: debts.linked_debt_id,
-                direction: debts.direction,
-            })
+            .select({ linked_debt_id: debts.linked_debt_id })
             .from(debts)
             .innerJoin(contacts, eq(contacts.id, debts.contact_id))
             .where(
                 and(
                     eq(debts.owner_id, peerUserId),
                     eq(debts.status, "open"),
+                    eq(debts.direction, flipDirection(direction)),
                     eq(contacts.linked_user_id, ownerId),
                 ),
             )
@@ -393,31 +397,10 @@ export async function findOpenDebtId(
         for (const peerDebt of peerOpenRows) {
             if (!peerDebt.linked_debt_id) continue;
             const ours = await getDebtById(peerDebt.linked_debt_id);
-            if (!ours || ours.owner_id !== ownerId) continue;
-            if (ours.status !== "open" && ours.status !== "closed") continue;
-            // Prefer matching flipped direction, else accept
-            if (ours.direction === direction || peerDebt.direction === flipDirection(direction)) {
+            if (ours && ours.owner_id === ownerId && ours.direction === direction) {
                 return ours.id;
             }
         }
-
-        // Peer ochiq, bizda linked ochiq to'g'ridan
-        const oursDirect = await db
-            .select({ id: debts.id, direction: debts.direction })
-            .from(debts)
-            .innerJoin(contacts, eq(contacts.id, debts.contact_id))
-            .where(
-                and(
-                    eq(debts.owner_id, ownerId),
-                    eq(debts.status, "open"),
-                    eq(contacts.linked_user_id, peerUserId),
-                ),
-            )
-            .orderBy(desc(debts.updated_at));
-
-        const same = oursDirect.find((r) => r.direction === direction);
-        if (same) return same.id;
-        if (oursDirect.length === 1) return oursDirect[0].id;
     }
 
     return null;
