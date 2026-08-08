@@ -31,7 +31,6 @@ import {
     listIncomingAccountShares,
     listOwnedDebts,
     listOutgoingAccountShares,
-    listSharedDebts,
     resolveDebtAccess,
     revokeShare,
     setDueDate,
@@ -301,24 +300,6 @@ export async function showDebtList(
     }
 }
 
-export async function showSharedList(ctx: CTX) {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-        const list = await listSharedDebts(user.id, "open");
-        if (!list.length) {
-            await ctx.reply(t(user.language, "no_shared"), { reply_markup: mainReplyKeyboard(user.language) });
-            return;
-        }
-        await ctx.reply(`<b>${t(user.language, "shared_with_you")}</b> (${list.length})`, {
-            parse_mode: "HTML",
-            reply_markup: debtListKeyboard(user.language, list, "sdebt"),
-        });
-    } catch (error) {
-        await sendErrorLog({ event: "showSharedList", error, ctx });
-    }
-}
-
 export async function showDebtDetail(ctx: CTX, debtId: number) {
     try {
         const [user] = await saveUser(ctx);
@@ -349,6 +330,8 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
             text += `\n\n${t(user.language, "owned_by")}: ${owner?.first_name || "—"}`;
         }
 
+        const canShare = access.isOwner && !debt.linked_debt_id;
+
         await ctx.answerCallbackQuery().catch(() => undefined);
         await ctx.editMessageText(text, {
             parse_mode: "HTML",
@@ -358,6 +341,7 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
                 access.canWrite && debt.status === "open",
                 access.isOwner,
                 backCallback,
+                canShare,
             ),
         }).catch(async () => {
             await ctx.reply(text, {
@@ -368,6 +352,7 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
                     access.canWrite && debt.status === "open",
                     access.isOwner,
                     backCallback,
+                    canShare,
                 ),
             });
         });
@@ -460,6 +445,16 @@ export async function onShareStart(ctx: CTX, debtId: number) {
             scope: "debt",
             debtId,
         });
+
+        if (!invite.ok) {
+            const msg =
+                invite.error === "already_linked"
+                    ? t(user.language, "share_already_linked")
+                    : t(user.language, "no_permission");
+            await ctx.answerCallbackQuery({ text: msg }).catch(() => undefined);
+            return;
+        }
+
         const me = await bot.api.getMe();
         const link = `https://t.me/${me.username}?start=share_${invite.token}`;
 
@@ -487,6 +482,11 @@ export async function onShareAllNew(ctx: CTX) {
             granterId: user.id,
             scope: "all",
         });
+        if (!invite.ok) {
+            await ctx.answerCallbackQuery({ text: t(user.language, "no_permission") }).catch(() => undefined);
+            return;
+        }
+
         const me = await bot.api.getMe();
         const link = `https://t.me/${me.username}?start=share_${invite.token}`;
 
@@ -605,10 +605,6 @@ export async function handleTextMessage(ctx: CTX) {
         }
         if (text === t(lang, "btn_people") || text === t("uz", "btn_people") || text === t("cyrl", "btn_people")) {
             await showPeopleList(ctx);
-            return;
-        }
-        if (text === t(lang, "btn_shared") || text === t("uz", "btn_shared") || text === t("cyrl", "btn_shared")) {
-            await showSharedList(ctx);
             return;
         }
         if (text === t(lang, "btn_settings") || text === t("uz", "btn_settings") || text === t("cyrl", "btn_settings")) {

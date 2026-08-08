@@ -152,11 +152,6 @@ export async function registerCallbackRouter(ctx: CTX) {
             return;
         }
 
-        if (data.startsWith("sdebt_")) {
-            await showDebtDetail(ctx, Number(data.slice(6)));
-            return;
-        }
-
         if (data.startsWith("repay_")) {
             await onRepayStart(ctx, Number(data.slice(6)));
             return;

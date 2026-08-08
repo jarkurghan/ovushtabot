@@ -12,11 +12,49 @@ export type DebtWithMeta = {
     due_date: string | null;
     status: "open" | "closed";
     note: string | null;
+    linked_debt_id: number | null;
     balance: number;
     created_at: Date;
 };
 
 export type DebtItemRow = typeof debtItems.$inferSelect;
+
+const debtSelect = {
+    id: debts.id,
+    owner_id: debts.owner_id,
+    contact_id: debts.contact_id,
+    contact_name: contacts.name,
+    direction: debts.direction,
+    due_date: debts.due_date,
+    status: debts.status,
+    note: debts.note,
+    linked_debt_id: debts.linked_debt_id,
+    created_at: debts.created_at,
+};
+
+function mapDebtRows(
+    rows: Array<{
+        id: number;
+        owner_id: number;
+        contact_id: number;
+        contact_name: string;
+        direction: string;
+        due_date: string | null;
+        status: string;
+        note: string | null;
+        linked_debt_id: number | null;
+        created_at: Date;
+    }>,
+    balances: Map<number, number>,
+): DebtWithMeta[] {
+    return rows.map((r) => ({
+        ...r,
+        direction: r.direction as Direction,
+        status: r.status as "open" | "closed",
+        linked_debt_id: r.linked_debt_id ?? null,
+        balance: balances.get(r.id) ?? 0,
+    }));
+}
 
 async function balanceForDebtIds(debtIds: number[]): Promise<Map<number, number>> {
     const map = new Map<number, number>();
@@ -35,19 +73,43 @@ async function balanceForDebtIds(debtIds: number[]): Promise<Map<number, number>
     return map;
 }
 
-export async function getOrCreateContact(ownerId: number, name: string) {
+export async function getOrCreateContact(ownerId: number, name: string, linkedUserId?: number | null) {
     const trimmed = name.trim().replace(/\s+/g, " ");
+
+    if (linkedUserId) {
+        const [byLink] = await db
+            .select()
+            .from(contacts)
+            .where(and(eq(contacts.owner_id, ownerId), eq(contacts.linked_user_id, linkedUserId)))
+            .limit(1);
+        if (byLink) return byLink;
+    }
+
     const [existing] = await db
         .select()
         .from(contacts)
         .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, trimmed)))
         .limit(1);
 
-    if (existing) return existing;
+    if (existing) {
+        if (linkedUserId && !existing.linked_user_id) {
+            const [updated] = await db
+                .update(contacts)
+                .set({ linked_user_id: linkedUserId })
+                .where(eq(contacts.id, existing.id))
+                .returning();
+            return updated;
+        }
+        return existing;
+    }
 
     const [created] = await db
         .insert(contacts)
-        .values({ owner_id: ownerId, name: trimmed })
+        .values({
+            owner_id: ownerId,
+            name: trimmed,
+            linked_user_id: linkedUserId ?? null,
+        })
         .returning();
     return created;
 }
@@ -101,29 +163,14 @@ export async function listDebtsByContact(
     status: "open" | "closed" = "open",
 ): Promise<DebtWithMeta[]> {
     const rows = await db
-        .select({
-            id: debts.id,
-            owner_id: debts.owner_id,
-            contact_id: debts.contact_id,
-            contact_name: contacts.name,
-            direction: debts.direction,
-            due_date: debts.due_date,
-            status: debts.status,
-            note: debts.note,
-            created_at: debts.created_at,
-        })
+        .select(debtSelect)
         .from(debts)
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
         .where(and(eq(debts.owner_id, ownerId), eq(debts.contact_id, contactId), eq(debts.status, status)))
         .orderBy(desc(debts.updated_at));
 
     const balances = await balanceForDebtIds(rows.map((r) => r.id));
-    return rows.map((r) => ({
-        ...r,
-        direction: r.direction as Direction,
-        status: r.status as "open" | "closed",
-        balance: balances.get(r.id) ?? 0,
-    }));
+    return mapDebtRows(rows, balances);
 }
 
 export async function createDebt(params: {
@@ -164,6 +211,7 @@ export async function createDebt(params: {
         due_date: debt.due_date,
         status: debt.status as "open" | "closed",
         note: debt.note,
+        linked_debt_id: debt.linked_debt_id ?? null,
         balance: params.amount,
         created_at: debt.created_at,
     };
@@ -175,6 +223,8 @@ export async function addDebtItem(params: {
     amount: number;
     createdBy: number;
     note?: string | null;
+    /** Twin ga qayta sync qilmaslik (loop oldini olish) */
+    skipTwinSync?: boolean;
 }): Promise<{ balance: number; closed: boolean }> {
     await db.insert(debtItems).values({
         debt_id: params.debtId,
@@ -195,30 +245,46 @@ export async function addDebtItem(params: {
         await db.update(debts).set({ status: "open" }).where(eq(debts.id, params.debtId));
     }
 
+    if (!params.skipTwinSync) {
+        const [row] = await db.select({ linked_debt_id: debts.linked_debt_id }).from(debts).where(eq(debts.id, params.debtId)).limit(1);
+        if (row?.linked_debt_id) {
+            await addDebtItem({
+                debtId: row.linked_debt_id,
+                type: params.type,
+                amount: params.amount,
+                createdBy: params.createdBy,
+                note: params.note,
+                skipTwinSync: true,
+            });
+        }
+    }
+
     return { balance: Math.max(balance, 0), closed };
 }
 
-export async function setDueDate(debtId: number, dueDate: string | null) {
+export async function setDueDate(debtId: number, dueDate: string | null, skipTwinSync = false) {
     await db.update(debts).set({ due_date: dueDate }).where(eq(debts.id, debtId));
+    if (!skipTwinSync) {
+        const [row] = await db.select({ linked_debt_id: debts.linked_debt_id }).from(debts).where(eq(debts.id, debtId)).limit(1);
+        if (row?.linked_debt_id) {
+            await setDueDate(row.linked_debt_id, dueDate, true);
+        }
+    }
 }
 
-export async function closeDebt(debtId: number) {
+export async function closeDebt(debtId: number, skipTwinSync = false) {
     await db.update(debts).set({ status: "closed" }).where(eq(debts.id, debtId));
+    if (!skipTwinSync) {
+        const [row] = await db.select({ linked_debt_id: debts.linked_debt_id }).from(debts).where(eq(debts.id, debtId)).limit(1);
+        if (row?.linked_debt_id) {
+            await closeDebt(row.linked_debt_id, true);
+        }
+    }
 }
 
 export async function getDebtById(debtId: number): Promise<DebtWithMeta | null> {
     const [row] = await db
-        .select({
-            id: debts.id,
-            owner_id: debts.owner_id,
-            contact_id: debts.contact_id,
-            contact_name: contacts.name,
-            direction: debts.direction,
-            due_date: debts.due_date,
-            status: debts.status,
-            note: debts.note,
-            created_at: debts.created_at,
-        })
+        .select(debtSelect)
         .from(debts)
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
         .where(eq(debts.id, debtId))
@@ -226,12 +292,7 @@ export async function getDebtById(debtId: number): Promise<DebtWithMeta | null> 
 
     if (!row) return null;
     const balances = await balanceForDebtIds([row.id]);
-    return {
-        ...row,
-        direction: row.direction as Direction,
-        status: row.status as "open" | "closed",
-        balance: balances.get(row.id) ?? 0,
-    };
+    return mapDebtRows([row], balances)[0] ?? null;
 }
 
 export async function getDebtItems(debtId: number): Promise<DebtItemRow[]> {
@@ -248,29 +309,14 @@ export async function listOwnedDebts(
     if (direction) conditions.push(eq(debts.direction, direction));
 
     const rows = await db
-        .select({
-            id: debts.id,
-            owner_id: debts.owner_id,
-            contact_id: debts.contact_id,
-            contact_name: contacts.name,
-            direction: debts.direction,
-            due_date: debts.due_date,
-            status: debts.status,
-            note: debts.note,
-            created_at: debts.created_at,
-        })
+        .select(debtSelect)
         .from(debts)
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
         .where(and(...conditions))
         .orderBy(desc(debts.updated_at));
 
     const balances = await balanceForDebtIds(rows.map((r) => r.id));
-    return rows.map((r) => ({
-        ...r,
-        direction: r.direction as Direction,
-        status: r.status as "open" | "closed",
-        balance: balances.get(r.id) ?? 0,
-    }));
+    return mapDebtRows(rows, balances);
 }
 
 async function activeSharesForUser(userId: number) {
@@ -278,104 +324,6 @@ async function activeSharesForUser(userId: number) {
         .select()
         .from(shares)
         .where(and(eq(shares.grantee_id, userId), eq(shares.status, "active")));
-}
-
-/** Ulashilgan qarzlar (grantee uchun) */
-export async function listSharedDebts(granteeId: number, status: "open" | "closed" = "open"): Promise<DebtWithMeta[]> {
-    const userShares = await activeSharesForUser(granteeId);
-    if (!userShares.length) return [];
-
-    const debtIdSet = new Set<number>();
-    const contactPairs: { granterId: number; contactId: number }[] = [];
-    const allGranters: number[] = [];
-
-    for (const s of userShares) {
-        if (s.scope === "debt" && s.debt_id) debtIdSet.add(s.debt_id);
-        if (s.scope === "contact" && s.contact_id) contactPairs.push({ granterId: s.granter_id, contactId: s.contact_id });
-        if (s.scope === "all") allGranters.push(s.granter_id);
-    }
-
-    const conditions = [];
-
-    if (debtIdSet.size) {
-        const byIds = await db
-            .select({
-                id: debts.id,
-                owner_id: debts.owner_id,
-                contact_id: debts.contact_id,
-                contact_name: contacts.name,
-                direction: debts.direction,
-                due_date: debts.due_date,
-                status: debts.status,
-                note: debts.note,
-                created_at: debts.created_at,
-            })
-            .from(debts)
-            .innerJoin(contacts, eq(contacts.id, debts.contact_id))
-            .where(and(inArray(debts.id, [...debtIdSet]), eq(debts.status, status)));
-        conditions.push(...byIds);
-    }
-
-    if (contactPairs.length) {
-        for (const pair of contactPairs) {
-            const rows = await db
-                .select({
-                    id: debts.id,
-                    owner_id: debts.owner_id,
-                    contact_id: debts.contact_id,
-                    contact_name: contacts.name,
-                    direction: debts.direction,
-                    due_date: debts.due_date,
-                    status: debts.status,
-                    note: debts.note,
-                    created_at: debts.created_at,
-                })
-                .from(debts)
-                .innerJoin(contacts, eq(contacts.id, debts.contact_id))
-                .where(
-                    and(
-                        eq(debts.owner_id, pair.granterId),
-                        eq(debts.contact_id, pair.contactId),
-                        eq(debts.status, status),
-                    ),
-                );
-            conditions.push(...rows);
-        }
-    }
-
-    if (allGranters.length) {
-        const rows = await db
-            .select({
-                id: debts.id,
-                owner_id: debts.owner_id,
-                contact_id: debts.contact_id,
-                contact_name: contacts.name,
-                direction: debts.direction,
-                due_date: debts.due_date,
-                status: debts.status,
-                note: debts.note,
-                created_at: debts.created_at,
-            })
-            .from(debts)
-            .innerJoin(contacts, eq(contacts.id, debts.contact_id))
-            .where(and(inArray(debts.owner_id, allGranters), eq(debts.status, status)));
-        conditions.push(...rows);
-    }
-
-    const unique = new Map<number, (typeof conditions)[number]>();
-    for (const row of conditions) unique.set(row.id, row);
-
-    const rows = [...unique.values()];
-    const balances = await balanceForDebtIds(rows.map((r) => r.id));
-
-    return rows
-        .map((r) => ({
-            ...r,
-            direction: r.direction as Direction,
-            status: r.status as "open" | "closed",
-            balance: balances.get(r.id) ?? 0,
-        }))
-        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
 }
 
 export type DebtAccess = {
@@ -402,8 +350,9 @@ export async function resolveDebtAccess(user: User, debtId: number): Promise<Deb
         if (s.scope === "contact" && s.contact_id === debt.contact_id) matches = true;
         if (s.scope === "debt" && s.debt_id === debt.id) matches = true;
 
-        // Account/debt ulashish — full access
-        if (matches) return { canView: true, canWrite: true, isOwner: false };
+        // Account ulashish — full access (debt-share twin orqali isOwner bo'ladi)
+        if (matches && s.scope === "all") return { canView: true, canWrite: true, isOwner: false };
+        if (matches && s.scope !== "debt") return { canView: true, canWrite: true, isOwner: false };
     }
 
     return { canView: false, canWrite: false, isOwner: false };
@@ -436,7 +385,17 @@ export async function createShareInvite(params: {
     granterId: number;
     scope: "all" | "debt";
     debtId?: number;
-}): Promise<{ token: string; id: number }> {
+}): Promise<{ ok: true; token: string; id: number } | { ok: false; error: "already_linked" | "not_found" }> {
+    if (params.scope === "debt" && params.debtId) {
+        const debt = await getDebtById(params.debtId);
+        if (!debt || debt.owner_id !== params.granterId) {
+            return { ok: false, error: "not_found" };
+        }
+        if (debt.linked_debt_id) {
+            return { ok: false, error: "already_linked" };
+        }
+    }
+
     const token = crypto.randomUUID().replaceAll("-", "");
 
     const [row] = await db
@@ -452,13 +411,19 @@ export async function createShareInvite(params: {
         })
         .returning();
 
-    return { token, id: row.id };
+    return { ok: true, token, id: row.id };
 }
 
 export async function acceptShareInvite(token: string, granteeId: number) {
     const [share] = await db.select().from(shares).where(eq(shares.invite_token, token)).limit(1);
     if (!share || share.status === "revoked") return null;
     if (share.granter_id === granteeId) return null;
+
+    // Debt share → twin debt (grantee o'z Qarzlarimida ko'radi)
+    if (share.scope === "debt" && share.debt_id) {
+        const { ensureTwinDebt } = await import("./debt-link");
+        await ensureTwinDebt(share.debt_id, granteeId);
+    }
 
     const [updated] = await db
         .update(shares)
@@ -501,44 +466,25 @@ export async function revokeShare(shareId: number, actorId: number) {
 /** Due date bo'yicha ochiq qarzlar (scheduler) */
 export async function listDebtsDueOn(dateIso: string): Promise<DebtWithMeta[]> {
     const rows = await db
-        .select({
-            id: debts.id,
-            owner_id: debts.owner_id,
-            contact_id: debts.contact_id,
-            contact_name: contacts.name,
-            direction: debts.direction,
-            due_date: debts.due_date,
-            status: debts.status,
-            note: debts.note,
-            created_at: debts.created_at,
-        })
+        .select(debtSelect)
         .from(debts)
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
         .where(and(eq(debts.status, "open"), eq(debts.due_date, dateIso)));
 
     const balances = await balanceForDebtIds(rows.map((r) => r.id));
-    return rows.map((r) => ({
-        ...r,
-        direction: r.direction as Direction,
-        status: r.status as "open" | "closed",
-        balance: balances.get(r.id) ?? 0,
-    }));
+    return mapDebtRows(rows, balances);
 }
 
+/** Account managerlar (+ twin owner alohida party-notify da) */
 export async function listActiveGranteesForDebt(debt: DebtWithMeta): Promise<{ userId: number }[]> {
     const rows = await db
         .select()
         .from(shares)
-        .where(and(eq(shares.granter_id, debt.owner_id), eq(shares.status, "active")));
+        .where(and(eq(shares.granter_id, debt.owner_id), eq(shares.status, "active"), eq(shares.scope, "all")));
 
     const result: { userId: number }[] = [];
     for (const s of rows) {
-        if (!s.grantee_id) continue;
-        let matches = false;
-        if (s.scope === "all") matches = true;
-        if (s.scope === "contact" && s.contact_id === debt.contact_id) matches = true;
-        if (s.scope === "debt" && s.debt_id === debt.id) matches = true;
-        if (matches) result.push({ userId: s.grantee_id });
+        if (s.grantee_id) result.push({ userId: s.grantee_id });
     }
     return result;
 }

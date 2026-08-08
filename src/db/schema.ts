@@ -9,6 +9,7 @@ import {
     timestamp,
     uniqueIndex,
     index,
+    type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable(
@@ -57,7 +58,11 @@ export const contacts = pgTable(
     ],
 );
 
-/** Alohida qarz (bir odamdan bir necha marta qarz olish mumkin). */
+/**
+ * Alohida qarz.
+ * linked_debt_id — ikkinchi tomon qarzining jufti (twin).
+ * Ulashilganda grantee uchun alohida debt yozuvi yaratiladi (yo'nalish teskari) va ikkisi bog'lanadi.
+ */
 export const debts = pgTable(
     "debts",
     {
@@ -73,6 +78,8 @@ export const debts = pgTable(
         due_date: date("due_date"),
         status: text("status", { enum: ["open", "closed"] }).default("open").notNull(),
         note: text("note"),
+        /** Ikkinchi tomondagi juft qarz (qabul qilingan debt-share) */
+        linked_debt_id: integer("linked_debt_id").references((): AnyPgColumn => debts.id),
         created_at: timestamp("created_at").defaultNow().notNull(),
         updated_at: timestamp("updated_at")
             .defaultNow()
@@ -83,6 +90,7 @@ export const debts = pgTable(
         index("debts_contact_idx").on(table.contact_id),
         index("debts_due_date_idx").on(table.due_date),
         index("debts_status_idx").on(table.status),
+        uniqueIndex("debts_linked_debt_id_unique").on(table.linked_debt_id),
     ],
 );
 
@@ -108,10 +116,9 @@ export const debtItems = pgTable(
 
 /**
  * Ulashish:
- * - scope=all  → account ulashish: granter nomidan to'liq boshqaruv (full access)
- * - scope=debt → qarzni ikkinchi tomonga ulashish (shu qarz bo'yicha to'liq amallar)
- * - scope=contact → legacy (ishlatilmaydi)
- * access: doim "write" (full). "view" legacy uchun qoladi.
+ * - scope=all  → account ulashish: granter nomidan to'liq boshqaruv
+ * - scope=debt → taklif (pending); qabulda twin debt yaratiladi, keyin grantee o'z Qarzlarimida ko'radi
+ * access: doim "write" (full).
  */
 export const shares = pgTable(
     "shares",

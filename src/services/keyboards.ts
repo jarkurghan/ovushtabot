@@ -12,7 +12,6 @@ export function mainReplyKeyboard(lang: Lang) {
         .text(t(lang, "btn_lent"))
         .text(t(lang, "btn_people"))
         .row()
-        .text(t(lang, "btn_shared"))
         .text(t(lang, "btn_settings"))
         .resized()
         .persistent();
@@ -111,6 +110,7 @@ export function debtDetailKeyboard(
     canWrite: boolean,
     isOwner: boolean,
     backCallback = "list_open",
+    canShare = true,
 ) {
     const kb = new InlineKeyboard();
     if (canWrite) {
@@ -118,7 +118,7 @@ export function debtDetailKeyboard(
         kb.text(t(lang, "set_due"), `due_${debtId}`).row();
         kb.text(t(lang, "close_debt"), `close_${debtId}`).row();
     }
-    if (isOwner) {
+    if (isOwner && canShare) {
         kb.text(t(lang, "share_debt"), `share_${debtId}`).row();
     }
     kb.text(t(lang, "btn_back"), backCallback);

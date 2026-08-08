@@ -15,6 +15,13 @@ async function debtParties(debt: DebtWithMeta, excludeUserId: number): Promise<U
 
     if (debt.owner_id !== excludeUserId) ids.add(debt.owner_id);
 
+    // Twin egasi — ikkinchi tomon
+    if (debt.linked_debt_id) {
+        const twin = await getDebtById(debt.linked_debt_id);
+        if (twin && twin.owner_id !== excludeUserId) ids.add(twin.owner_id);
+    }
+
+    // Account managerlar
     const grantees = await listActiveGranteesForDebt(debt);
     for (const g of grantees) {
         if (g.userId !== excludeUserId) ids.add(g.userId);
@@ -35,7 +42,13 @@ async function sendToParties(debtId: number, actorId: number, buildText: (user: 
     const parties = await debtParties(debt, actorId);
     for (const user of parties) {
         try {
-            await bot.api.sendMessage(user.tg_id, buildText(user, debt), { parse_mode: "HTML" });
+            // Twin egasiga o'z nuqtai nazaridagi matn
+            let viewDebt = debt;
+            if (debt.linked_debt_id) {
+                const twin = await getDebtById(debt.linked_debt_id);
+                if (twin && twin.owner_id === user.id) viewDebt = twin;
+            }
+            await bot.api.sendMessage(user.tg_id, buildText(user, viewDebt), { parse_mode: "HTML" });
         } catch (error) {
             await sendErrorLog({ event: `Party notify (${user.tg_id})`, error });
         }
@@ -58,7 +71,7 @@ export async function notifyDebtItemAdded(params: {
             actor: actorName,
             name: debt.contact_name,
             amount: formatAmount(params.amount, user.language),
-            balance: formatAmount(params.balance, user.language),
+            balance: formatAmount(debt.balance, user.language),
         });
         if (params.closed) {
             text += `\n${t(user.language, "notify_debt_closed_auto", { name: debt.contact_name })}`;
