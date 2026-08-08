@@ -140,7 +140,6 @@ export function debtDetailKeyboard(
     if (canWrite) {
         kb.text(`↩️ ${t(lang, "repay")}`, `repay_${debtId}`).text(`➕ ${t(lang, "charge")}`, `charge_${debtId}`).row();
         kb.text(t(lang, "set_due"), `due_${debtId}`).row();
-        kb.text(t(lang, "close_debt"), `close_${debtId}`).row();
     }
     if (isOwner && canShare) {
         kb.text(t(lang, "share_debt"), `share_${debtId}`).row();
