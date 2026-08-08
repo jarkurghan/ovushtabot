@@ -83,7 +83,8 @@ export function debtListKeyboard(lang: Lang, list: DebtWithMeta[], prefix = "deb
     const kb = new InlineKeyboard();
     for (const d of list) {
         const arrow = d.direction === "borrowed" ? "📥" : "📤";
-        const label = `${arrow} ${d.contact_name}: ${formatAmount(d.balance, lang)}`;
+        const amount = prefix === "cdebt" ? d.initial_amount : d.balance;
+        const label = `${arrow} ${d.contact_name}: ${formatAmount(amount, lang)}`;
         kb.text(label.slice(0, 60), `debt_${d.id}`).row();
     }
     if (prefix === "debt") {
@@ -104,7 +105,8 @@ export function contactDebtsKeyboard(
     for (const d of list) {
         const arrow = d.direction === "borrowed" ? "📥" : "📤";
         const due = d.due_date ? ` · ${formatDate(d.due_date, lang)}` : "";
-        const label = `${arrow} ${formatAmount(d.balance, lang)}${due}`;
+        const amount = status === "closed" ? d.initial_amount : d.balance;
+        const label = `${arrow} ${formatAmount(amount, lang)}${due}`;
         kb.text(label.slice(0, 60), `debt_${d.id}`).row();
     }
     if (status === "open") {

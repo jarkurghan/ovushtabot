@@ -292,14 +292,15 @@ export async function showDebtList(ctx: CTX, status: "open" | "closed" = "open")
                 status === "open"
                     ? t(user.language, "no_debts")
                     : t(user.language, "closed_debts") + ": 0";
+            const replyMarkup = debtListKeyboard(user.language, [], prefix);
             if (ctx.callbackQuery) {
                 await ctx.editMessageText(text, {
-                    reply_markup: debtListKeyboard(user.language, [], prefix),
+                    reply_markup: replyMarkup,
                 }).catch(async () => {
-                    await ctx.reply(text, { reply_markup: mainReplyKeyboard(user.language) });
+                    await ctx.reply(text, { reply_markup: replyMarkup });
                 });
             } else {
-                await ctx.reply(text, { reply_markup: mainReplyKeyboard(user.language) });
+                await ctx.reply(text, { reply_markup: replyMarkup });
             }
             return;
         }

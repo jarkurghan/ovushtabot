@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { contacts, debtItems, debts, shares } from "../db/schema";
 import { db } from "../db";
 import type { Direction, User } from "../utils/types";
@@ -14,6 +14,8 @@ export type DebtWithMeta = {
     note: string | null;
     linked_debt_id: number | null;
     balance: number;
+    /** Birinchi charge summasi (yopilgan ro'yxat uchun) */
+    initial_amount: number;
     created_at: Date;
 };
 
@@ -46,6 +48,7 @@ function mapDebtRows(
         created_at: Date;
     }>,
     balances: Map<number, number>,
+    initials: Map<number, number>,
 ): DebtWithMeta[] {
     return rows.map((r) => ({
         ...r,
@@ -53,6 +56,7 @@ function mapDebtRows(
         status: r.status as "open" | "closed",
         linked_debt_id: r.linked_debt_id ?? null,
         balance: balances.get(r.id) ?? 0,
+        initial_amount: initials.get(r.id) ?? 0,
     }));
 }
 
@@ -71,6 +75,45 @@ async function balanceForDebtIds(debtIds: number[]): Promise<Map<number, number>
 
     for (const row of rows) map.set(row.debt_id, row.balance);
     return map;
+}
+
+/** Har bir qarzning eng birinchi charge summasi */
+async function firstChargeForDebtIds(debtIds: number[]): Promise<Map<number, number>> {
+    const map = new Map<number, number>();
+    if (!debtIds.length) return map;
+
+    const rows = await db
+        .select({
+            debt_id: debtItems.debt_id,
+            amount: debtItems.amount,
+        })
+        .from(debtItems)
+        .where(and(inArray(debtItems.debt_id, debtIds), eq(debtItems.type, "charge")))
+        .orderBy(asc(debtItems.created_at), asc(debtItems.id));
+
+    for (const row of rows) {
+        if (!map.has(row.debt_id)) map.set(row.debt_id, row.amount);
+    }
+    return map;
+}
+
+async function enrichDebtRows(
+    rows: Array<{
+        id: number;
+        owner_id: number;
+        contact_id: number;
+        contact_name: string;
+        direction: string;
+        due_date: string | null;
+        status: string;
+        note: string | null;
+        linked_debt_id: number | null;
+        created_at: Date;
+    }>,
+): Promise<DebtWithMeta[]> {
+    const ids = rows.map((r) => r.id);
+    const [balances, initials] = await Promise.all([balanceForDebtIds(ids), firstChargeForDebtIds(ids)]);
+    return mapDebtRows(rows, balances, initials);
 }
 
 export async function getOrCreateContact(ownerId: number, name: string, linkedUserId?: number | null) {
@@ -230,8 +273,7 @@ export async function listDebtsByContact(
         .where(and(eq(debts.owner_id, ownerId), eq(debts.contact_id, contactId), eq(debts.status, status)))
         .orderBy(desc(debts.updated_at));
 
-    const balances = await balanceForDebtIds(rows.map((r) => r.id));
-    return mapDebtRows(rows, balances);
+    return enrichDebtRows(rows);
 }
 
 export async function createDebt(params: {
@@ -274,6 +316,7 @@ export async function createDebt(params: {
         note: debt.note,
         linked_debt_id: debt.linked_debt_id ?? null,
         balance: params.amount,
+        initial_amount: params.amount,
         created_at: debt.created_at,
     };
 }
@@ -352,8 +395,7 @@ export async function getDebtById(debtId: number): Promise<DebtWithMeta | null> 
         .limit(1);
 
     if (!row) return null;
-    const balances = await balanceForDebtIds([row.id]);
-    return mapDebtRows([row], balances)[0] ?? null;
+    return (await enrichDebtRows([row]))[0] ?? null;
 }
 
 export async function getDebtItems(debtId: number): Promise<DebtItemRow[]> {
@@ -376,8 +418,7 @@ export async function listOwnedDebts(
         .where(and(...conditions))
         .orderBy(desc(debts.updated_at));
 
-    const balances = await balanceForDebtIds(rows.map((r) => r.id));
-    return mapDebtRows(rows, balances);
+    return enrichDebtRows(rows);
 }
 
 async function activeSharesForUser(userId: number) {
@@ -532,8 +573,7 @@ export async function listDebtsDueOn(dateIso: string): Promise<DebtWithMeta[]> {
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
         .where(and(eq(debts.status, "open"), eq(debts.due_date, dateIso)));
 
-    const balances = await balanceForDebtIds(rows.map((r) => r.id));
-    return mapDebtRows(rows, balances);
+    return enrichDebtRows(rows);
 }
 
 /** Account managerlar (+ twin owner alohida party-notify da) */
