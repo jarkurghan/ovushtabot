@@ -102,7 +102,6 @@ export function contactPickerKeyboard(
         kb.text(c.name.slice(0, 60), `cpick_${c.id}`).row();
     }
     appendPageNav(kb, lang, "cpick", page, totalPages);
-    kb.text(t(lang, "contact_new"), "cpick_new").row();
     kb.text(t(lang, "btn_cancel"), "cancel");
     return kb;
 }

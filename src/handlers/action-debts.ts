@@ -411,26 +411,6 @@ export async function onContactPick(ctx: CTX, contactId: number) {
     }
 }
 
-export async function onContactPickNew(ctx: CTX) {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-        const session = getSession(ctx.from!.id);
-        if (!session.direction) {
-            await ctx.answerCallbackQuery({ text: t(user.language, "cancelled") }).catch(() => undefined);
-            return;
-        }
-        setSession(ctx.from!.id, { step: "add_contact_name", direction: session.direction });
-        await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.deleteMessage().catch(() => undefined);
-        await ctx.reply(`${t(user.language, "ask_contact_type")}\n${t(user.language, "contact_hint")}`, {
-            reply_markup: cancelKeyboard(user.language),
-        });
-    } catch (error) {
-        await sendErrorLog({ event: "onContactPickNew", error, ctx });
-    }
-}
-
 export async function showPeopleList(ctx: CTX, page = 0) {
     try {
         const [user] = await saveUser(ctx);
@@ -970,13 +950,6 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         if (session.step === "add_contact_name") {
-            if (text === t(lang, "contact_new") || text === t("uz", "contact_new") || text === t("cyrl", "contact_new")) {
-                await ctx.reply(`${t(lang, "ask_contact_type")}\n${t(lang, "contact_hint")}`, {
-                    reply_markup: cancelKeyboard(lang),
-                });
-                return;
-            }
-
             const known = await listContacts(user.id);
             const matched = known.find((c) => c.name === text);
             const contactName = matched?.name ?? text;

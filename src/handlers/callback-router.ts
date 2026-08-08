@@ -5,7 +5,6 @@ import {
     onChargeStart,
     onCloseDebt,
     onContactPick,
-    onContactPickNew,
     onDirection,
     onToggleHideWhenZero,
     onDueStart,
@@ -86,11 +85,6 @@ export async function registerCallbackRouter(ctx: CTX) {
         if (data === "summary" || data.startsWith("summary_p")) {
             const page = data === "summary" ? 0 : (parsePageCallback(data)?.page ?? 0);
             await showDebtSummary(ctx, page);
-            return;
-        }
-
-        if (data === "cpick_new") {
-            await onContactPickNew(ctx);
             return;
         }
 
