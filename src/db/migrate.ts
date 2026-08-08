@@ -16,6 +16,11 @@ async function main() {
         WHERE scope = 'all' AND status <> 'revoked'
     `;
 
+    await sql`
+        ALTER TABLE contacts
+        ADD COLUMN IF NOT EXISTS hide_when_zero boolean NOT NULL DEFAULT false
+    `;
+
     await sql.end({ timeout: 5 });
     console.log("Migration completed");
 }

@@ -154,6 +154,7 @@ export function contactDebtsKeyboard(
     status: "open" | "closed",
     page: number,
     totalPages: number,
+    hideWhenZero = false,
 ) {
     const kb = new InlineKeyboard();
     for (const d of list) {
@@ -171,6 +172,10 @@ export function contactDebtsKeyboard(
         kb.text(t(lang, "open_debts"), `pdebts_${contactId}`).row();
     }
     kb.text(t(lang, "edit_contact_name"), `rename_${contactId}`).row();
+    const hideLabel = hideWhenZero
+        ? t(lang, "hide_when_zero_on")
+        : t(lang, "hide_when_zero_off");
+    kb.text(hideLabel, `hidez_${contactId}`).row();
     kb.text(t(lang, "btn_back"), "people");
     return kb;
 }

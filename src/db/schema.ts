@@ -47,6 +47,8 @@ export const contacts = pgTable(
             .references(() => users.id),
         name: text("name").notNull(),
         linked_user_id: integer("linked_user_id").references(() => users.id),
+        /** true: ochiq qarz 0 bo'lsa qarz qo'shishdagi tanlash ro'yxatida ko'rinmaydi */
+        hide_when_zero: boolean("hide_when_zero").default(false).notNull(),
         created_at: timestamp("created_at").defaultNow().notNull(),
         updated_at: timestamp("updated_at")
             .defaultNow()

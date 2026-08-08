@@ -29,10 +29,12 @@ import {
     getDebtItems,
     listContactSummaries,
     listContacts,
+    listContactsForPicker,
     listDebtsByContact,
     listOwnedDebts,
     renameContact,
     resolveDebtAccess,
+    setContactHideWhenZero,
     setDueDate,
     type CreateDebtResult,
     type DebtWithMeta,
@@ -317,7 +319,7 @@ export async function onDirection(ctx: CTX) {
         await ctx.answerCallbackQuery().catch(() => undefined);
         await ctx.deleteMessage().catch(() => undefined);
 
-        const known = await listContacts(user.id);
+        const known = await listContactsForPicker(user.id);
         if (known.length > 0) {
             await showContactPicker(ctx, 0);
             return;
@@ -342,7 +344,17 @@ export async function showContactPicker(ctx: CTX, page = 0) {
             return;
         }
 
-        const known = await listContacts(user.id);
+        const known = await listContactsForPicker(user.id);
+        if (!known.length) {
+            if (ctx.callbackQuery) {
+                await ctx.answerCallbackQuery().catch(() => undefined);
+                await ctx.deleteMessage().catch(() => undefined);
+            }
+            await ctx.reply(`${t(user.language, "ask_contact_type")}\n${t(user.language, "contact_hint")}`, {
+                reply_markup: cancelKeyboard(user.language),
+            });
+            return;
+        }
         const { slice, page: p, totalPages, total } = paginate(known, page);
         const suffix =
             totalPages > 1 ? t(user.language, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
@@ -489,10 +501,43 @@ export async function showContactDebts(
         await editOrReply(
             ctx,
             text,
-            contactDebtsKeyboard(user.language, slice, contactId, status, p, totalPages),
+            contactDebtsKeyboard(
+                user.language,
+                slice,
+                contactId,
+                status,
+                p,
+                totalPages,
+                contact.hide_when_zero,
+            ),
         );
     } catch (error) {
         await sendErrorLog({ event: "showContactDebts", error, ctx });
+    }
+}
+
+export async function onToggleHideWhenZero(ctx: CTX, contactId: number) {
+    try {
+        const [user] = await saveUser(ctx);
+        if (!user) return;
+
+        const contact = await getContactById(contactId, user.id);
+        if (!contact) {
+            await ctx.answerCallbackQuery({ text: t(user.language, "no_permission") }).catch(() => undefined);
+            return;
+        }
+
+        const next = !contact.hide_when_zero;
+        await setContactHideWhenZero(contactId, user.id, next);
+        await ctx
+            .answerCallbackQuery({
+                text: t(user.language, next ? "hide_when_zero_set_on" : "hide_when_zero_set_off"),
+            })
+            .catch(() => undefined);
+
+        await showContactDebts(ctx, contactId, "open", 0);
+    } catch (error) {
+        await sendErrorLog({ event: "onToggleHideWhenZero", error, ctx });
     }
 }
 

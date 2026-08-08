@@ -165,6 +165,64 @@ export async function listContacts(ownerId: number) {
         .orderBy(contacts.name);
 }
 
+/** Kontakt bo'yicha ochiq qarzlar jami balansi */
+async function openBalanceByContactIds(ownerId: number, contactIds: number[]): Promise<Map<number, number>> {
+    const map = new Map<number, number>();
+    if (!contactIds.length) return map;
+
+    const openRows = await db
+        .select(debtSelect)
+        .from(debts)
+        .innerJoin(contacts, eq(contacts.id, debts.contact_id))
+        .where(
+            and(
+                eq(debts.owner_id, ownerId),
+                eq(debts.status, "open"),
+                inArray(debts.contact_id, contactIds),
+            ),
+        );
+    const enriched = await enrichDebtRows(openRows);
+    for (const d of enriched) {
+        map.set(d.contact_id, (map.get(d.contact_id) ?? 0) + d.balance);
+    }
+    return map;
+}
+
+/**
+ * Qarz qo'shishdagi tanlash ro'yxati:
+ * hide_when_zero=true va ochiq qarz jami <= 0 bo'lsa chiqarilmaydi.
+ */
+export async function listContactsForPicker(ownerId: number) {
+    const known = await listContacts(ownerId);
+    if (!known.length) return [];
+
+    const needFilter = known.filter((c) => c.hide_when_zero);
+    if (!needFilter.length) return known;
+
+    const balances = await openBalanceByContactIds(
+        ownerId,
+        needFilter.map((c) => c.id),
+    );
+
+    return known.filter((c) => {
+        if (!c.hide_when_zero) return true;
+        return (balances.get(c.id) ?? 0) > 0;
+    });
+}
+
+export async function setContactHideWhenZero(
+    contactId: number,
+    ownerId: number,
+    hideWhenZero: boolean,
+): Promise<typeof contacts.$inferSelect | null> {
+    const [updated] = await db
+        .update(contacts)
+        .set({ hide_when_zero: hideWhenZero })
+        .where(and(eq(contacts.id, contactId), eq(contacts.owner_id, ownerId)))
+        .returning();
+    return updated ?? null;
+}
+
 export async function getContactById(contactId: number, ownerId: number) {
     const [row] = await db
         .select()

@@ -7,6 +7,7 @@ import {
     onContactPick,
     onContactPickNew,
     onDirection,
+    onToggleHideWhenZero,
     onDueStart,
     onNotifyTimeMenu,
     onNotifyTimeSet,
@@ -138,6 +139,11 @@ export async function registerCallbackRouter(ctx: CTX) {
                 await showContactDebts(ctx, id, "closed", 0);
                 return;
             }
+        }
+
+        if (data.startsWith("hidez_")) {
+            await onToggleHideWhenZero(ctx, Number(data.slice("hidez_".length)));
+            return;
         }
 
         if (data.startsWith("rename_")) {
