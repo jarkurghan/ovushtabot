@@ -303,14 +303,48 @@ export type CreateDebtResult = {
     amount: number;
 };
 
-/** Shu tanish + yo'nalishdagi ochiq qarz id (yo'q bo'lsa null) */
+function flipDirection(direction: Direction): Direction {
+    return direction === "borrowed" ? "lent" : "borrowed";
+}
+
+/** Owner + peer o'rtasidagi ochiq qarz (yo'nalish bo'yicha) */
+async function findOpenDebtWithPeer(
+    ownerId: number,
+    peerUserId: number,
+    direction: Direction,
+): Promise<number | null> {
+    const [row] = await db
+        .select({ id: debts.id })
+        .from(debts)
+        .innerJoin(contacts, eq(contacts.id, debts.contact_id))
+        .where(
+            and(
+                eq(debts.owner_id, ownerId),
+                eq(debts.direction, direction),
+                eq(debts.status, "open"),
+                eq(contacts.linked_user_id, peerUserId),
+            ),
+        )
+        .orderBy(desc(debts.updated_at))
+        .limit(1);
+    return row?.id ?? null;
+}
+
+/**
+ * Shu tanish + yo'nalishdagi ochiq qarz.
+ * Ikkala tomon / borrowed|lent: kontakt nomi, contactId yoki linked peer orqali topiladi.
+ */
 export async function findOpenDebtId(
     ownerId: number,
     contactName: string,
     direction: Direction,
+    contactId?: number | null,
 ): Promise<number | null> {
-    const contact = await getOrCreateContact(ownerId, contactName);
-    const [row] = await db
+    const contact = contactId
+        ? ((await getContactById(contactId, ownerId)) ?? (await getOrCreateContact(ownerId, contactName)))
+        : await getOrCreateContact(ownerId, contactName);
+
+    const [byContact] = await db
         .select({ id: debts.id })
         .from(debts)
         .where(
@@ -323,7 +357,25 @@ export async function findOpenDebtId(
         )
         .orderBy(desc(debts.updated_at))
         .limit(1);
-    return row?.id ?? null;
+    if (byContact) return byContact.id;
+
+    const peerUserId = await resolveContactLinkedUserId(contact);
+    if (!peerUserId || peerUserId === ownerId) return null;
+
+    // Shu peer bilan boshqa kontakt nomida ochiq qarz
+    const byPeer = await findOpenDebtWithPeer(ownerId, peerUserId, direction);
+    if (byPeer) return byPeer;
+
+    // Peer tomonda ochiq juft qarz → bizdagi linked ochiq qarz
+    const peerOpenId = await findOpenDebtWithPeer(peerUserId, ownerId, flipDirection(direction));
+    if (!peerOpenId) return null;
+    const peerDebt = await getDebtById(peerOpenId);
+    if (!peerDebt?.linked_debt_id) return null;
+    const ours = await getDebtById(peerDebt.linked_debt_id);
+    if (ours && ours.owner_id === ownerId && ours.status === "open" && ours.direction === direction) {
+        return ours.id;
+    }
+    return null;
 }
 
 export async function createDebt(params: {
@@ -333,26 +385,62 @@ export async function createDebt(params: {
     amount: number;
     dueDate?: string | null;
     createdBy: number;
+    contactId?: number | null;
 }): Promise<CreateDebtResult> {
-    const contact = await getOrCreateContact(params.ownerId, params.contactName);
+    const contact = params.contactId
+        ? ((await getContactById(params.contactId, params.ownerId)) ??
+          (await getOrCreateContact(params.ownerId, params.contactName)))
+        : await getOrCreateContact(params.ownerId, params.contactName);
 
-    // Shu tanish + yo'nalishda ochiq qarz bo'lsa — yangi qarz emas, item
-    const openExistingId = await findOpenDebtId(params.ownerId, params.contactName, params.direction);
-    const openExisting = openExistingId ? { id: openExistingId } : null;
+    // Shu tanish + yo'nalishda ochiq qarz bo'lsa — yangi qarz emas, item (twin sync addDebtItem da)
+    const openExistingId = await findOpenDebtId(
+        params.ownerId,
+        params.contactName,
+        params.direction,
+        contact.id,
+    );
 
-    if (openExisting) {
+    const mergeInto = async (debtId: number): Promise<CreateDebtResult> => {
+        const existing = await getDebtById(debtId);
+        if (!existing) throw new Error("createDebt merge: debt missing");
+        if (existing.status === "closed") {
+            await db.update(debts).set({ status: "open" }).where(eq(debts.id, debtId));
+        }
         await addDebtItem({
-            debtId: openExisting.id,
+            debtId,
             type: "charge",
             amount: params.amount,
             createdBy: params.createdBy,
         });
         if (params.dueDate) {
-            await setDueDate(openExisting.id, params.dueDate);
+            await setDueDate(debtId, params.dueDate);
         }
-        const debt = await getDebtById(openExisting.id);
-        if (!debt) throw new Error("createDebt merge: debt missing");
+        const debt = await getDebtById(debtId);
+        if (!debt) throw new Error("createDebt merge: debt missing after charge");
         return { debt, merged: true, amount: params.amount };
+    };
+
+    if (openExistingId) {
+        return mergeInto(openExistingId);
+    }
+
+    // Peer tomonda ochiq juft qarz bor — bizdagi juftiga qo'sh (ikkala tomon / borrowed|lent)
+    const peerUserId = await resolveContactLinkedUserId(contact);
+    if (peerUserId && peerUserId !== params.ownerId) {
+        const peerOpenId = await findOpenDebtWithPeer(
+            peerUserId,
+            params.ownerId,
+            flipDirection(params.direction),
+        );
+        if (peerOpenId) {
+            const peerDebt = await getDebtById(peerOpenId);
+            if (peerDebt?.linked_debt_id) {
+                const ours = await getDebtById(peerDebt.linked_debt_id);
+                if (ours && ours.owner_id === params.ownerId && ours.direction === params.direction) {
+                    return mergeInto(ours.id);
+                }
+            }
+        }
     }
 
     const [debt] = await db
@@ -374,8 +462,6 @@ export async function createDebt(params: {
         note: null,
     });
 
-    // Avvalgi ulashish bo'lsa — yangi qarzni avtomatik twin qilish
-    const peerUserId = await resolveContactLinkedUserId(contact);
     if (peerUserId && peerUserId !== params.ownerId) {
         const { ensureTwinDebt } = await import("./debt-link");
         await ensureTwinDebt(debt.id, peerUserId);

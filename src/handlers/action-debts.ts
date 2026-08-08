@@ -781,6 +781,7 @@ export async function handleTextMessage(ctx: CTX) {
                     amount: session.amount,
                     dueDate: null,
                     createdBy: user.id,
+                    contactId: session.contactId,
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
@@ -846,8 +847,13 @@ export async function handleTextMessage(ctx: CTX) {
             }
 
             const ownerId = session.asOwnerId || user.id;
-            // Ochiq qarz bor — sana so'ralmasin, darhol item qo'shilsin
-            const openId = await findOpenDebtId(ownerId, session.contactName, session.direction);
+            // Ochiq qarz bor (ikkala tomon / borrowed|lent) — sana so'ralmasin
+            const openId = await findOpenDebtId(
+                ownerId,
+                session.contactName,
+                session.direction,
+                session.contactId,
+            );
             if (openId) {
                 const result = await createDebt({
                     ownerId,
@@ -856,6 +862,7 @@ export async function handleTextMessage(ctx: CTX) {
                     amount,
                     dueDate: null,
                     createdBy: user.id,
+                    contactId: session.contactId,
                 });
                 clearSession(ctx.from.id);
                 await notifyAfterDebtCreate(result, user);
@@ -870,6 +877,7 @@ export async function handleTextMessage(ctx: CTX) {
                 step: "add_due_date",
                 amount,
                 contactName: session.contactName,
+                contactId: session.contactId,
                 direction: session.direction,
                 asOwnerId: session.asOwnerId,
             });
@@ -898,6 +906,7 @@ export async function handleTextMessage(ctx: CTX) {
                 amount: session.amount,
                 dueDate: due,
                 createdBy: user.id,
+                contactId: session.contactId,
             });
             clearSession(ctx.from.id);
             await notifyAfterDebtCreate(result, user);
