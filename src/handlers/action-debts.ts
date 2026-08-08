@@ -62,7 +62,12 @@ function resolveDuePreset(text: string, lang: Lang): string | null {
     return null;
 }
 import { sendErrorLog } from "../services/log";
-import { notifyDebtClosed, notifyDebtCreated, notifyDebtItemAdded } from "../services/party-notify";
+import {
+    notifyDebtClosed,
+    notifyDebtCreated,
+    notifyDebtDueChanged,
+    notifyDebtItemAdded,
+} from "../services/party-notify";
 import { bot } from "../bot";
 
 async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
@@ -768,8 +773,10 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
             if (session.step === "set_due_date" && session.debtId) {
-                await setDueDate(session.debtId, null);
+                const debtId = session.debtId;
+                await setDueDate(debtId, null);
                 clearSession(ctx.from.id);
+                await notifyDebtDueChanged({ debtId, actor: user, dueDate: null });
                 await ctx.reply(t(lang, "due_set"), { reply_markup: mainReplyKeyboard(lang) });
                 return;
             }
@@ -935,8 +942,10 @@ export async function handleTextMessage(ctx: CTX) {
                 await ctx.reply(t(lang, "write_denied"), { reply_markup: mainReplyKeyboard(lang) });
                 return;
             }
-            await setDueDate(session.debtId, due);
+            const debtId = session.debtId;
+            await setDueDate(debtId, due);
             clearSession(ctx.from.id);
+            await notifyDebtDueChanged({ debtId, actor: user, dueDate: due });
             await ctx.reply(t(lang, "due_set"), { reply_markup: mainReplyKeyboard(lang) });
             return;
         }

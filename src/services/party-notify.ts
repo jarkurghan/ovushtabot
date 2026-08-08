@@ -1,6 +1,6 @@
 import { bot } from "../bot";
 import { t } from "../i18n";
-import { formatAmount } from "../utils/format";
+import { formatAmount, formatDate } from "../utils/format";
 import type { User } from "../utils/types";
 import {
     getDebtById,
@@ -101,6 +101,28 @@ export async function notifyDebtCreated(params: { debt: DebtWithMeta; actor: Use
             name: debt.contact_name,
             direction: t(user.language, dirKey),
             amount: formatAmount(debt.balance, user.language),
+        });
+    });
+}
+
+export async function notifyDebtDueChanged(params: {
+    debtId: number;
+    actor: User;
+    dueDate: string | null;
+}) {
+    const actorName = params.actor.first_name || "User";
+
+    await sendToParties(params.debtId, params.actor.id, (user, debt) => {
+        if (!params.dueDate) {
+            return t(user.language, "notify_due_cleared", {
+                actor: actorName,
+                name: debt.contact_name,
+            });
+        }
+        return t(user.language, "notify_due_set", {
+            actor: actorName,
+            name: debt.contact_name,
+            due: formatDate(params.dueDate, user.language),
         });
     });
 }
