@@ -26,8 +26,7 @@ export async function registerStartCommand(ctx: CommandContext<Context>) {
         if (payloadObj.share) {
             const accepted = await acceptShareInvite(payloadObj.share, user.id);
             if (accepted) {
-                const key = accepted.scope === "all" ? "share_accepted_account" : "share_accepted_debt";
-                await ctx.reply(t(user.language, key), {
+                await ctx.reply(t(user.language, "share_accepted_debt"), {
                     reply_markup: mainReplyKeyboard(user.language),
                 });
             } else {

@@ -1,8 +1,7 @@
 import type { CTX, Direction, Lang, User } from "../utils/types";
 import { t } from "../i18n";
-import { saveUser, getUserById } from "../services/save-user";
+import { saveUser } from "../services/save-user";
 import {
-    actAsKeyboard,
     cancelKeyboard,
     cancelSkipKeyboard,
     contactDebtsKeyboard,
@@ -17,7 +16,6 @@ import {
     notifyTimeKeyboard,
     peopleBrowseKeyboard,
     repayAmountKeyboard,
-    sharesListKeyboard,
 } from "../services/keyboards";
 import {
     addDebtItem,
@@ -31,12 +29,9 @@ import {
     listContactSummaries,
     listContacts,
     listDebtsByContact,
-    listIncomingAccountShares,
     listOwnedDebts,
-    listOutgoingAccountShares,
     renameContact,
     resolveDebtAccess,
-    revokeShare,
     setDueDate,
     type CreateDebtResult,
     type DebtWithMeta,
@@ -173,7 +168,6 @@ async function continueAfterItemNote(ctx: CTX, user: User, lang: Lang, note: str
                 contactName: session.contactName,
                 contactId: session.contactId,
                 direction: session.direction,
-                asOwnerId: session.asOwnerId,
                 itemAction: undefined,
                 needsDueDate: undefined,
             });
@@ -182,7 +176,7 @@ async function continueAfterItemNote(ctx: CTX, user: User, lang: Lang, note: str
         }
 
         const result = await createDebt({
-            ownerId: session.asOwnerId || user.id,
+            ownerId: user.id,
             contactName: session.contactName,
             direction: session.direction,
             amount: session.amount,
@@ -264,13 +258,12 @@ async function continueAfterItemNote(ctx: CTX, user: User, lang: Lang, note: str
     await ctx.reply(t(lang, "cancelled"), { reply_markup: mainReplyKeyboard(lang) });
 }
 
-async function beginAddDebtFlow(ctx: CTX, asOwnerId?: number) {
+async function beginAddDebtFlow(ctx: CTX) {
     const [user] = await saveUser(ctx);
     if (!user) return;
     clearSession(ctx.from!.id);
     setSession(ctx.from!.id, {
         step: "idle",
-        asOwnerId: asOwnerId || user.id,
         direction: undefined,
         contactName: undefined,
         contactId: undefined,
@@ -290,46 +283,9 @@ export async function startAddDebt(ctx: CTX) {
         const [user] = await saveUser(ctx);
         if (!user) return;
         clearSession(ctx.from!.id);
-
-        const accountShares = await listIncomingAccountShares(user.id);
-        if (accountShares.length > 0) {
-            const accounts: { id: number; name: string }[] = [];
-            for (const s of accountShares) {
-                const owner = await getUserById(s.granter_id);
-                if (owner) accounts.push({ id: owner.id, name: owner.first_name || String(owner.tg_id) });
-            }
-            await ctx.reply(t(user.language, "act_as_choose"), {
-                reply_markup: actAsKeyboard(user.language, accounts),
-            });
-            return;
-        }
-
-        await beginAddDebtFlow(ctx, user.id);
+        await beginAddDebtFlow(ctx);
     } catch (error) {
         await sendErrorLog({ event: "startAddDebt", error, ctx });
-    }
-}
-
-export async function onActAs(ctx: CTX, asOwnerId: number | "self") {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-        await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.deleteMessage().catch(() => undefined);
-
-        if (asOwnerId === "self") {
-            await beginAddDebtFlow(ctx, user.id);
-            return;
-        }
-
-        const shares = await listIncomingAccountShares(user.id);
-        if (!shares.some((s) => s.granter_id === asOwnerId)) {
-            await ctx.reply(t(user.language, "no_permission"), { reply_markup: mainReplyKeyboard(user.language) });
-            return;
-        }
-        await beginAddDebtFlow(ctx, asOwnerId);
-    } catch (error) {
-        await sendErrorLog({ event: "onActAs", error, ctx });
     }
 }
 
@@ -339,18 +295,15 @@ export async function onDirection(ctx: CTX) {
         if (!user) return;
         const data = ctx.callbackQuery?.data || "";
         const direction: Direction = data === "dir_lent" ? "lent" : "borrowed";
-        const prev = getSession(ctx.from!.id);
-        const ownerId = prev.asOwnerId || user.id;
 
         setSession(ctx.from!.id, {
             step: "add_contact_name",
             direction,
-            asOwnerId: ownerId,
         });
         await ctx.answerCallbackQuery().catch(() => undefined);
         await ctx.deleteMessage().catch(() => undefined);
 
-        const known = await listContacts(ownerId);
+        const known = await listContacts(user.id);
         if (known.length > 0) {
             await ctx.reply(t(user.language, "ask_contact_pick"), {
                 reply_markup: contactPickerKeyboard(
@@ -624,11 +577,7 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
 
         const items = await getDebtItems(debtId);
         const preview = formatItemsPreview(user.language, items);
-        let text = formatDebtCard(user.language, debt, preview);
-        if (!access.isOwner) {
-            const owner = await getUserById(debt.owner_id);
-            text += `\n\n${t(user.language, "owned_by")}: ${owner?.first_name || "—"}`;
-        }
+        const text = formatDebtCard(user.language, debt, preview);
 
         const canShare = access.isOwner && !debt.linked_debt_id;
 
@@ -744,7 +693,6 @@ export async function onShareStart(ctx: CTX, debtId: number) {
 
         const invite = await createShareInvite({
             granterId: user.id,
-            scope: "debt",
             debtId,
         });
 
@@ -781,90 +729,6 @@ export async function onShareStart(ctx: CTX, debtId: number) {
         });
     } catch (error) {
         await sendErrorLog({ event: "onShareStart", error, ctx });
-    }
-}
-
-export async function onShareAllNew(ctx: CTX) {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-
-        const invite = await createShareInvite({
-            granterId: user.id,
-            scope: "all",
-        });
-        if (!invite.ok) {
-            await ctx.answerCallbackQuery({ text: t(user.language, "no_permission") }).catch(() => undefined);
-            return;
-        }
-
-        const me = await bot.api.getMe();
-        const link = `https://t.me/${me.username}?start=share_${invite.token}`;
-
-        await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.editMessageText(`${t(user.language, "share_link_account")}\n\n<code>${link}</code>`, {
-            parse_mode: "HTML",
-            reply_markup: sharesListKeyboard(user.language, []),
-        }).catch(async () => {
-            await ctx.reply(`${t(user.language, "share_link_account")}\n\n<code>${link}</code>`, {
-                parse_mode: "HTML",
-                reply_markup: mainReplyKeyboard(user.language),
-            });
-        });
-    } catch (error) {
-        await sendErrorLog({ event: "onShareAllNew", error, ctx });
-    }
-}
-
-export async function showSharesSettings(ctx: CTX) {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-
-        const outgoing = await listOutgoingAccountShares(user.id);
-        const incoming = await listIncomingAccountShares(user.id);
-
-        const items: { id: number; label: string }[] = [];
-
-        for (const s of outgoing) {
-            const grantee = s.grantee_id ? await getUserById(s.grantee_id) : null;
-            const who = grantee?.first_name || (s.status === "pending" ? "⏳ pending" : "?");
-            items.push({
-                id: s.id,
-                label: `${t(user.language, "access_granted_to")} ${who}`,
-            });
-        }
-        for (const s of incoming) {
-            const granter = await getUserById(s.granter_id);
-            items.push({
-                id: s.id,
-                label: `${t(user.language, "access_from")} ${granter?.first_name || "?"}`,
-            });
-        }
-
-        const text = `${t(user.language, "settings_shares")}\n\n${t(user.language, "share_account_hint")}${
-            items.length ? "" : `\n\n${t(user.language, "access_list_empty")}`
-        }`;
-        await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.editMessageText(text, { reply_markup: sharesListKeyboard(user.language, items) }).catch(async () => {
-            await ctx.reply(text, { reply_markup: sharesListKeyboard(user.language, items) });
-        });
-    } catch (error) {
-        await sendErrorLog({ event: "showSharesSettings", error, ctx });
-    }
-}
-
-export async function onRevokeShare(ctx: CTX, shareId: number) {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-        const ok = await revokeShare(shareId, user.id);
-        await ctx.answerCallbackQuery({
-            text: ok ? t(user.language, "share_revoked") : t(user.language, "no_permission"),
-        }).catch(() => undefined);
-        await showSharesSettings(ctx);
-    } catch (error) {
-        await sendErrorLog({ event: "onRevokeShare", error, ctx });
     }
 }
 
@@ -978,7 +842,7 @@ export async function handleTextMessage(ctx: CTX) {
             }
             if (session.step === "add_due_date" && session.direction && session.contactName && session.amount) {
                 const result = await createDebt({
-                    ownerId: session.asOwnerId || user.id,
+                    ownerId: user.id,
                     contactName: session.contactName,
                     direction: session.direction,
                     amount: session.amount,
@@ -1013,8 +877,6 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         if (session.step === "add_contact_name") {
-            const ownerId = session.asOwnerId || user.id;
-
             if (text === t(lang, "contact_new") || text === t("uz", "contact_new") || text === t("cyrl", "contact_new")) {
                 await ctx.reply(`${t(lang, "ask_contact_type")}\n${t(lang, "contact_hint")}`, {
                     reply_markup: cancelKeyboard(lang),
@@ -1022,7 +884,7 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
 
-            const known = await listContacts(ownerId);
+            const known = await listContacts(user.id);
             const matched = known.find((c) => c.name === text);
             const contactName = matched?.name ?? text;
 
@@ -1036,7 +898,6 @@ export async function handleTextMessage(ctx: CTX) {
                 contactName,
                 contactId: matched?.id,
                 direction: session.direction,
-                asOwnerId: session.asOwnerId,
             });
             await ctx.reply(`${t(lang, "ask_amount")}\n${t(lang, "amount_hint")}`, {
                 reply_markup: cancelKeyboard(lang),
@@ -1056,12 +917,11 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
 
-            const ownerId = session.asOwnerId || user.id;
             const oppositeDir = session.direction === "borrowed" ? "lent" : "borrowed";
             // Bir xil yoki teskari ochiq qarz bor — sana so'ralmasin (charge yoki repay)
             const openId =
-                (await findOpenDebtId(ownerId, session.contactName, session.direction, session.contactId)) ??
-                (await findOpenDebtId(ownerId, session.contactName, oppositeDir, session.contactId));
+                (await findOpenDebtId(user.id, session.contactName, session.direction, session.contactId)) ??
+                (await findOpenDebtId(user.id, session.contactName, oppositeDir, session.contactId));
 
             setSession(ctx.from.id, {
                 step: "item_note",
@@ -1069,7 +929,6 @@ export async function handleTextMessage(ctx: CTX) {
                 contactName: session.contactName,
                 contactId: session.contactId,
                 direction: session.direction,
-                asOwnerId: session.asOwnerId,
                 itemAction: "add",
                 needsDueDate: !openId,
                 note: undefined,
@@ -1093,7 +952,7 @@ export async function handleTextMessage(ctx: CTX) {
             }
 
             const result = await createDebt({
-                ownerId: session.asOwnerId || user.id,
+                ownerId: user.id,
                 contactName: session.contactName,
                 direction: session.direction,
                 amount: session.amount,

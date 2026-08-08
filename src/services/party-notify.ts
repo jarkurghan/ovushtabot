@@ -4,7 +4,6 @@ import { formatAmount, formatDate } from "../utils/format";
 import type { User } from "../utils/types";
 import {
     getDebtById,
-    listActiveGranteesForDebt,
     type DebtWithMeta,
 } from "./debts";
 import { getUserById } from "./save-user";
@@ -19,12 +18,6 @@ async function debtParties(debt: DebtWithMeta, excludeUserId: number): Promise<U
     if (debt.linked_debt_id) {
         const twin = await getDebtById(debt.linked_debt_id);
         if (twin && twin.owner_id !== excludeUserId) ids.add(twin.owner_id);
-    }
-
-    // Account managerlar
-    const grantees = await listActiveGranteesForDebt(debt);
-    for (const g of grantees) {
-        if (g.userId !== excludeUserId) ids.add(g.userId);
     }
 
     const users: User[] = [];

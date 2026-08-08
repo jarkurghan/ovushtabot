@@ -2,7 +2,6 @@ import type { CTX } from "../utils/types";
 import { sendErrorLog } from "../services/log";
 import {
     handleTextMessage,
-    onActAs,
     onChargeStart,
     onCloseDebt,
     onDirection,
@@ -11,14 +10,11 @@ import {
     onNotifyTimeSet,
     onRenameContactStart,
     onRepayStart,
-    onRevokeShare,
-    onShareAllNew,
     onShareStart,
     showContactDebts,
     showDebtDetail,
     showDebtList,
     showPeopleList,
-    showSharesSettings,
     startAddDebt,
 } from "./action-debts";
 import {
@@ -55,16 +51,6 @@ export async function registerCallbackRouter(ctx: CTX) {
 
         if (data === "dir_borrowed" || data === "dir_lent") {
             await onDirection(ctx);
-            return;
-        }
-
-        if (data === "actas_self") {
-            await onActAs(ctx, "self");
-            return;
-        }
-
-        if (data.startsWith("actas_")) {
-            await onActAs(ctx, Number(data.slice("actas_".length)));
             return;
         }
 
@@ -123,16 +109,6 @@ export async function registerCallbackRouter(ctx: CTX) {
             return;
         }
 
-        if (data === "settings_shares") {
-            await showSharesSettings(ctx);
-            return;
-        }
-
-        if (data === "share_all_new") {
-            await onShareAllNew(ctx);
-            return;
-        }
-
         if (data.startsWith("ntime_")) {
             await onNotifyTimeSet(ctx, data.slice("ntime_".length));
             return;
@@ -170,11 +146,6 @@ export async function registerCallbackRouter(ctx: CTX) {
 
         if (data.startsWith("share_")) {
             await onShareStart(ctx, Number(data.slice(6)));
-            return;
-        }
-
-        if (data.startsWith("revoke_")) {
-            await onRevokeShare(ctx, Number(data.slice(7)));
             return;
         }
 

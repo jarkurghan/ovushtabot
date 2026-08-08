@@ -162,8 +162,6 @@ export function settingsKeyboard(lang: Lang, user: { notify_borrow: boolean; not
         .row()
         .text(`${t(lang, "settings_notify_lend")}: ${lendState}`, "toggle_lend")
         .row()
-        .text(t(lang, "settings_shares"), "settings_shares")
-        .row()
         .text(t(lang, "btn_done"), "menu");
 }
 
@@ -175,29 +173,6 @@ export function notifyTimeKeyboard(lang: Lang) {
         if ((h - 5) % 3 === 0) kb.row();
     }
     kb.row().text(t(lang, "btn_back"), "settings");
-    return kb;
-}
-
-export function sharesListKeyboard(
-    lang: Lang,
-    items: { id: number; label: string }[],
-) {
-    const kb = new InlineKeyboard();
-    kb.text(`➕ ${t(lang, "share_account_new")}`, "share_all_new").row();
-    for (const item of items) {
-        kb.text(`${t(lang, "revoke")}: ${item.label.slice(0, 40)}`, `revoke_${item.id}`).row();
-    }
-    kb.text(t(lang, "btn_back"), "settings");
-    return kb;
-}
-
-export function actAsKeyboard(lang: Lang, accounts: { id: number; name: string }[]) {
-    const kb = new InlineKeyboard();
-    kb.text(t(lang, "act_as_self"), "actas_self").row();
-    for (const a of accounts) {
-        kb.text(`${t(lang, "act_as_other")}: ${a.name}`, `actas_${a.id}`).row();
-    }
-    kb.text(t(lang, "btn_cancel"), "cancel");
     return kb;
 }
 

@@ -6,8 +6,7 @@ export type Lang = "uz" | "cyrl";
 export type Status = "new" | "active" | "inactive" | "deleted_account" | "has_blocked" | "other";
 export type Direction = "borrowed" | "lent";
 export type DebtItemType = "charge" | "repay";
-export type AccessLevel = "view" | "write";
-export type ShareScope = "all" | "contact" | "debt";
+export type ShareScope = "debt";
 export type ShareStatus = "pending" | "active" | "revoked";
 
 export type UserRow = typeof users.$inferSelect;
@@ -75,8 +74,6 @@ export type SessionData = {
     itemAction?: ItemNoteAction;
     /** Yangi qarz uchun muddat so'ralsinmi (merge emas) */
     needsDueDate?: boolean;
-    /** Account ulashish orqali boshqa user nomidan yozish */
-    asOwnerId?: number;
     /** Tanishlar bo'limidan ochilgan qarz — ortga qaytish uchun */
     browseContactId?: number;
     updatedAt: number;

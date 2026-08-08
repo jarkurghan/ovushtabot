@@ -115,9 +115,9 @@ export const debtItems = pgTable(
 );
 
 /**
- * Ulashish:
- * - scope=all  → account ulashish: granter nomidan to'liq boshqaruv
- * - scope=debt → taklif (pending); qabulda twin debt yaratiladi, keyin grantee o'z Qarzlarimida ko'radi
+ * Qarz ulashish (ikkinchi tomon):
+ * - scope=debt → taklif (pending); qabulda twin debt yaratiladi
+ * - scope=all / contact — tarixiy; endi yaratilmaydi
  * access: doim "write" (full).
  */
 export const shares = pgTable(

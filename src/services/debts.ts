@@ -649,19 +649,13 @@ export async function listOwnedDebts(
     return enrichDebtRows(rows);
 }
 
-async function activeSharesForUser(userId: number) {
-    return db
-        .select()
-        .from(shares)
-        .where(and(eq(shares.grantee_id, userId), eq(shares.status, "active")));
-}
-
 export type DebtAccess = {
     canView: boolean;
     canWrite: boolean;
     isOwner: boolean;
 };
 
+/** Faqat qarz egasi (twin egasi o'z debtiga owner) */
 export async function resolveDebtAccess(user: User, debtId: number): Promise<DebtAccess> {
     const debt = await getDebtById(debtId);
     if (!debt) return { canView: false, canWrite: false, isOwner: false };
@@ -670,60 +664,19 @@ export async function resolveDebtAccess(user: User, debtId: number): Promise<Deb
         return { canView: true, canWrite: true, isOwner: true };
     }
 
-    const userShares = await activeSharesForUser(user.id);
-
-    for (const s of userShares) {
-        if (s.granter_id !== debt.owner_id) continue;
-
-        let matches = false;
-        if (s.scope === "all") matches = true;
-        if (s.scope === "contact" && s.contact_id === debt.contact_id) matches = true;
-        if (s.scope === "debt" && s.debt_id === debt.id) matches = true;
-
-        // Account ulashish — full access (debt-share twin orqali isOwner bo'ladi)
-        if (matches && s.scope === "all") return { canView: true, canWrite: true, isOwner: false };
-        if (matches && s.scope !== "debt") return { canView: true, canWrite: true, isOwner: false };
-    }
-
     return { canView: false, canWrite: false, isOwner: false };
-}
-
-/** Account ulashish (scope=all) — faol kiruvchi */
-export async function listIncomingAccountShares(granteeId: number) {
-    return db
-        .select()
-        .from(shares)
-        .where(and(eq(shares.grantee_id, granteeId), eq(shares.status, "active"), eq(shares.scope, "all")))
-        .orderBy(desc(shares.created_at));
-}
-
-export async function listOutgoingAccountShares(granterId: number) {
-    return db
-        .select()
-        .from(shares)
-        .where(
-            and(
-                eq(shares.granter_id, granterId),
-                inArray(shares.status, ["pending", "active"]),
-                eq(shares.scope, "all"),
-            ),
-        )
-        .orderBy(desc(shares.created_at));
 }
 
 export async function createShareInvite(params: {
     granterId: number;
-    scope: "all" | "debt";
-    debtId?: number;
+    debtId: number;
 }): Promise<{ ok: true; token: string; id: number } | { ok: false; error: "already_linked" | "not_found" }> {
-    if (params.scope === "debt" && params.debtId) {
-        const debt = await getDebtById(params.debtId);
-        if (!debt || debt.owner_id !== params.granterId) {
-            return { ok: false, error: "not_found" };
-        }
-        if (debt.linked_debt_id) {
-            return { ok: false, error: "already_linked" };
-        }
+    const debt = await getDebtById(params.debtId);
+    if (!debt || debt.owner_id !== params.granterId) {
+        return { ok: false, error: "not_found" };
+    }
+    if (debt.linked_debt_id) {
+        return { ok: false, error: "already_linked" };
     }
 
     const token = crypto.randomUUID().replaceAll("-", "");
@@ -732,10 +685,10 @@ export async function createShareInvite(params: {
         .insert(shares)
         .values({
             granter_id: params.granterId,
-            scope: params.scope,
+            scope: "debt",
             access: "write",
             contact_id: null,
-            debt_id: params.debtId ?? null,
+            debt_id: params.debtId,
             invite_token: token,
             status: "pending",
         })
@@ -748,12 +701,11 @@ export async function acceptShareInvite(token: string, granteeId: number) {
     const [share] = await db.select().from(shares).where(eq(shares.invite_token, token)).limit(1);
     if (!share || share.status === "revoked") return null;
     if (share.granter_id === granteeId) return null;
+    // Faqat qarz ulashish (account scope=all endi qabul qilinmaydi)
+    if (share.scope !== "debt" || !share.debt_id) return null;
 
-    // Debt share → twin debt (grantee o'z Qarzlarimida ko'radi)
-    if (share.scope === "debt" && share.debt_id) {
-        const { ensureTwinDebt } = await import("./debt-link");
-        await ensureTwinDebt(share.debt_id, granteeId);
-    }
+    const { ensureTwinDebt } = await import("./debt-link");
+    await ensureTwinDebt(share.debt_id, granteeId);
 
     const [updated] = await db
         .update(shares)
@@ -768,31 +720,6 @@ export async function acceptShareInvite(token: string, granteeId: number) {
     return updated;
 }
 
-export async function listOutgoingShares(granterId: number) {
-    return db
-        .select()
-        .from(shares)
-        .where(and(eq(shares.granter_id, granterId), inArray(shares.status, ["pending", "active"])))
-        .orderBy(desc(shares.created_at));
-}
-
-export async function listIncomingShares(granteeId: number) {
-    return db
-        .select()
-        .from(shares)
-        .where(and(eq(shares.grantee_id, granteeId), eq(shares.status, "active")))
-        .orderBy(desc(shares.created_at));
-}
-
-export async function revokeShare(shareId: number, actorId: number) {
-    const [share] = await db.select().from(shares).where(eq(shares.id, shareId)).limit(1);
-    if (!share) return false;
-    if (share.granter_id !== actorId && share.grantee_id !== actorId) return false;
-
-    await db.update(shares).set({ status: "revoked" }).where(eq(shares.id, shareId));
-    return true;
-}
-
 /** Due date bo'yicha ochiq qarzlar (scheduler) */
 export async function listDebtsDueOn(dateIso: string): Promise<DebtWithMeta[]> {
     const rows = await db
@@ -804,16 +731,3 @@ export async function listDebtsDueOn(dateIso: string): Promise<DebtWithMeta[]> {
     return enrichDebtRows(rows);
 }
 
-/** Account managerlar (+ twin owner alohida party-notify da) */
-export async function listActiveGranteesForDebt(debt: DebtWithMeta): Promise<{ userId: number }[]> {
-    const rows = await db
-        .select()
-        .from(shares)
-        .where(and(eq(shares.granter_id, debt.owner_id), eq(shares.status, "active"), eq(shares.scope, "all")));
-
-    const result: { userId: number }[] = [];
-    for (const s of rows) {
-        if (s.grantee_id) result.push({ userId: s.grantee_id });
-    }
-    return result;
-}
