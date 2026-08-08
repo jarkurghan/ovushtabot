@@ -1,11 +1,11 @@
-import type { CTX, Direction } from "../utils/types";
+import type { CTX, Direction, Lang } from "../utils/types";
 import { t } from "../i18n";
 import { saveUser, getUserById } from "../services/save-user";
 import {
     actAsKeyboard,
     cancelKeyboard,
-    cancelSkipKeyboard,
     contactDebtsKeyboard,
+    dueDateKeyboard,
     contactPickerKeyboard,
     debtDetailKeyboard,
     debtListKeyboard,
@@ -36,7 +36,28 @@ import {
     setDueDate,
 } from "../services/debts";
 import { clearSession, getSession, setSession } from "../services/session";
-import { parseAmount, parseDate, formatAmount } from "../utils/format";
+import {
+    addDaysInTashkent,
+    addMonthsInTashkent,
+    firstOfNextMonthInTashkent,
+    formatAmount,
+    parseAmount,
+    parseDate,
+    todayInTashkent,
+} from "../utils/format";
+
+/** Tezkor sana tugmasi → ISO sana; null = tugma emas */
+function resolveDuePreset(text: string, lang: Lang): string | null {
+    const match = (...keys: string[]) => keys.some((k) => text === t(lang, k) || text === t("uz", k) || text === t("cyrl", k));
+
+    if (match("due_today")) return todayInTashkent();
+    if (match("due_tomorrow")) return addDaysInTashkent(1);
+    if (match("due_in_3_days")) return addDaysInTashkent(3);
+    if (match("due_in_1_week")) return addDaysInTashkent(7);
+    if (match("due_next_month_1st")) return firstOfNextMonthInTashkent();
+    if (match("due_in_1_month")) return addMonthsInTashkent(1);
+    return null;
+}
 import { sendErrorLog } from "../services/log";
 import { notifyDebtClosed, notifyDebtCreated, notifyDebtItemAdded } from "../services/party-notify";
 import { bot } from "../bot";
@@ -406,7 +427,7 @@ export async function onDueStart(ctx: CTX, debtId: number) {
         }
         setSession(ctx.from!.id, { step: "set_due_date", debtId });
         await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.reply(t(user.language, "ask_due_date"), { reply_markup: cancelSkipKeyboard(user.language) });
+        await ctx.reply(t(user.language, "ask_due_date"), { reply_markup: dueDateKeyboard(user.language) });
     } catch (error) {
         await sendErrorLog({ event: "onDueStart", error, ctx });
     }
@@ -710,21 +731,24 @@ export async function handleTextMessage(ctx: CTX) {
                 direction: session.direction,
                 asOwnerId: session.asOwnerId,
             });
-            await ctx.reply(t(lang, "ask_due_date"), { reply_markup: cancelSkipKeyboard(lang) });
+            await ctx.reply(t(lang, "ask_due_date"), { reply_markup: dueDateKeyboard(lang) });
             return;
         }
 
         if (session.step === "add_due_date") {
-            const due = parseDate(text);
-            if (!due) {
-                await ctx.reply(t(lang, "invalid_date"));
-                return;
-            }
             if (!session.direction || !session.contactName || !session.amount) {
                 clearSession(ctx.from.id);
                 await ctx.reply(t(lang, "cancelled"), { reply_markup: mainReplyKeyboard(lang) });
                 return;
             }
+
+            const preset = resolveDuePreset(text, lang);
+            const due = preset ?? parseDate(text);
+            if (!due) {
+                await ctx.reply(t(lang, "invalid_date"), { reply_markup: dueDateKeyboard(lang) });
+                return;
+            }
+
             const debt = await createDebt({
                 ownerId: session.asOwnerId || user.id,
                 contactName: session.contactName,
@@ -810,9 +834,10 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         if (session.step === "set_due_date" && session.debtId) {
-            const due = parseDate(text);
+            const preset = resolveDuePreset(text, lang);
+            const due = preset ?? parseDate(text);
             if (!due) {
-                await ctx.reply(t(lang, "invalid_date"));
+                await ctx.reply(t(lang, "invalid_date"), { reply_markup: dueDateKeyboard(lang) });
                 return;
             }
             const access = await resolveDebtAccess(user, session.debtId);

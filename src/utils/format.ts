@@ -35,27 +35,21 @@ export function formatAmount(amount: number, lang: "uz" | "cyrl" = "uz"): string
     return lang === "cyrl" ? `${formatted} сўм` : `${formatted} so'm`;
 }
 
-/** YYYY-MM-DD yoki DD.MM.YYYY */
+/** Faqat DD.MM.YYYY yoki DD/MM/YYYY → ISO YYYY-MM-DD */
 export function parseDate(input: string): string | null {
     const raw = input.trim();
-    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (iso) {
-        const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00Z`);
-        if (Number.isNaN(d.getTime())) return null;
-        return `${iso[1]}-${iso[2]}-${iso[3]}`;
-    }
-
     const dmy = raw.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
-    if (dmy) {
-        const day = dmy[1].padStart(2, "0");
-        const month = dmy[2].padStart(2, "0");
-        const year = dmy[3];
-        const d = new Date(`${year}-${month}-${day}T00:00:00Z`);
-        if (Number.isNaN(d.getTime())) return null;
-        return `${year}-${month}-${day}`;
-    }
+    if (!dmy) return null;
 
-    return null;
+    const day = dmy[1].padStart(2, "0");
+    const month = dmy[2].padStart(2, "0");
+    const year = dmy[3];
+    const d = new Date(`${year}-${month}-${day}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return null;
+    if (d.getUTCFullYear() !== Number(year) || d.getUTCMonth() + 1 !== Number(month) || d.getUTCDate() !== Number(day)) {
+        return null;
+    }
+    return `${year}-${month}-${day}`;
 }
 
 export function formatDate(iso: string | null | undefined, lang: "uz" | "cyrl" = "uz"): string {
@@ -71,6 +65,47 @@ export function todayInTashkent(): string {
         month: "2-digit",
         day: "2-digit",
     }).format(new Date());
+}
+
+function partsInTashkent(date: Date): { y: number; m: number; d: number } {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Tashkent",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(date);
+    const y = Number(parts.find((p) => p.type === "year")?.value);
+    const m = Number(parts.find((p) => p.type === "month")?.value);
+    const d = Number(parts.find((p) => p.type === "day")?.value);
+    return { y, m, d };
+}
+
+function isoFromParts(y: number, m: number, d: number): string {
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Bugungi Tashkent sanasidan +n kun */
+export function addDaysInTashkent(days: number): string {
+    const { y, m, d } = partsInTashkent(new Date());
+    const base = new Date(Date.UTC(y, m - 1, d));
+    base.setUTCDate(base.getUTCDate() + days);
+    return isoFromParts(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate());
+}
+
+/** Bugungi Tashkent sanasidan +n oy (shu kun; oy oxirida clamp) */
+export function addMonthsInTashkent(months: number): string {
+    const { y, m, d } = partsInTashkent(new Date());
+    const target = new Date(Date.UTC(y, m - 1 + months, 1));
+    const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+    const day = Math.min(d, lastDay);
+    return isoFromParts(target.getUTCFullYear(), target.getUTCMonth() + 1, day);
+}
+
+/** Keyingi oyning 1-sanasi (Tashkent) */
+export function firstOfNextMonthInTashkent(): string {
+    const { y, m } = partsInTashkent(new Date());
+    const next = new Date(Date.UTC(y, m, 1)); // m is 1-based; Date.UTC month is 0-based → m means next month
+    return isoFromParts(next.getUTCFullYear(), next.getUTCMonth() + 1, 1);
 }
 
 export function nowTimeInTashkent(): string {

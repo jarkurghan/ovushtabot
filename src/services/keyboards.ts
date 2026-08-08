@@ -25,6 +25,25 @@ export function cancelSkipKeyboard(lang: Lang) {
     return new Keyboard().text(t(lang, "btn_skip")).row().text(t(lang, "btn_cancel")).resized().oneTime();
 }
 
+export function dueDateKeyboard(lang: Lang) {
+    return new Keyboard()
+        .text(t(lang, "due_today"))
+        .text(t(lang, "due_tomorrow"))
+        .row()
+        .text(t(lang, "due_in_3_days"))
+        .text(t(lang, "due_in_1_week"))
+        .row()
+        .text(t(lang, "due_next_month_1st"))
+        .row()
+        .text(t(lang, "due_in_1_month"))
+        .row()
+        .text(t(lang, "btn_skip"))
+        .row()
+        .text(t(lang, "btn_cancel"))
+        .resized()
+        .oneTime();
+}
+
 export function languageKeyboard() {
     return new InlineKeyboard().text("O'zbek (lotin)", "lang_uz").row().text("Ўзбек (кирилл)", "lang_cyrl");
 }
