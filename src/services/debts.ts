@@ -183,9 +183,23 @@ async function openBalanceByContactIds(ownerId: number, contactIds: number[]): P
         );
     const enriched = await enrichDebtRows(openRows);
     for (const d of enriched) {
-        map.set(d.contact_id, (map.get(d.contact_id) ?? 0) + d.balance);
+        map.set(d.contact_id, (map.get(d.contact_id) ?? 0) + Math.max(d.balance, 0));
     }
     return map;
+}
+
+/** Shu kontakt bilan aktiv (ochiq, balans > 0) qarz bormi */
+export async function contactHasActiveDebt(ownerId: number, contactId: number): Promise<boolean> {
+    const balances = await openBalanceByContactIds(ownerId, [contactId]);
+    return (balances.get(contactId) ?? 0) > 0;
+}
+
+/** Yangi/qayta ochilgan qarzda «ovushmayman» avtomatik o'chadi */
+export async function clearHideWhenZeroForContact(contactId: number): Promise<void> {
+    await db
+        .update(contacts)
+        .set({ hide_when_zero: false })
+        .where(and(eq(contacts.id, contactId), eq(contacts.hide_when_zero, true)));
 }
 
 /**
@@ -214,13 +228,22 @@ export async function setContactHideWhenZero(
     contactId: number,
     ownerId: number,
     hideWhenZero: boolean,
-): Promise<typeof contacts.$inferSelect | null> {
+): Promise<{ ok: true; contact: typeof contacts.$inferSelect } | { ok: false; reason: "not_found" | "has_active" }> {
+    const contact = await getContactById(contactId, ownerId);
+    if (!contact) return { ok: false, reason: "not_found" };
+
+    if (hideWhenZero) {
+        const active = await contactHasActiveDebt(ownerId, contactId);
+        if (active) return { ok: false, reason: "has_active" };
+    }
+
     const [updated] = await db
         .update(contacts)
         .set({ hide_when_zero: hideWhenZero })
         .where(and(eq(contacts.id, contactId), eq(contacts.owner_id, ownerId)))
         .returning();
-    return updated ?? null;
+    if (!updated) return { ok: false, reason: "not_found" };
+    return { ok: true, contact: updated };
 }
 
 export async function getContactById(contactId: number, ownerId: number) {
@@ -523,6 +546,7 @@ export async function createDebt(params: {
             created_by: params.createdBy,
             note: itemNote,
         });
+        await clearHideWhenZeroForContact(contact.id);
 
         const peerUserId = await resolveContactLinkedUserId(contact);
         if (peerUserId && peerUserId !== params.ownerId) {
@@ -623,6 +647,15 @@ export async function addDebtItem(params: {
         created_by: params.createdBy,
         note: params.note || null,
     });
+
+    if (params.type === "charge") {
+        const [debtRow] = await db
+            .select({ contact_id: debts.contact_id })
+            .from(debts)
+            .where(eq(debts.id, params.debtId))
+            .limit(1);
+        if (debtRow) await clearHideWhenZeroForContact(debtRow.contact_id);
+    }
 
     const balances = await balanceForDebtIds([params.debtId]);
     const balance = balances.get(params.debtId) ?? 0;

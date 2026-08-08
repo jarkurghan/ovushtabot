@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { contacts, debtItems, debts, users } from "../db/schema";
 import { db } from "../db";
 import type { Direction } from "../utils/types";
-import { getOrCreateContact, getDebtById, type DebtWithMeta } from "./debts";
+import { clearHideWhenZeroForContact, getOrCreateContact, getDebtById, type DebtWithMeta } from "./debts";
 
 function flipDirection(direction: Direction): Direction {
     return direction === "borrowed" ? "lent" : "borrowed";
@@ -74,6 +74,10 @@ export async function ensureTwinDebt(sourceDebtId: number, granteeId: number): P
         .update(contacts)
         .set({ linked_user_id: granteeId })
         .where(eq(contacts.id, source.contact_id));
+
+    // Yangi twin = aktiv qarz → «ovushmayman» o'chadi (ikkala tomon)
+    await clearHideWhenZeroForContact(contact.id);
+    await clearHideWhenZeroForContact(source.contact_id);
 
     return getDebtById(twin.id);
 }

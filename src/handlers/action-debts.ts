@@ -32,6 +32,7 @@ import {
     listContactsForPicker,
     listDebtsByContact,
     listOwnedDebts,
+    contactHasActiveDebt,
     renameContact,
     resolveDebtAccess,
     setContactHideWhenZero,
@@ -470,6 +471,7 @@ export async function showContactDebts(
         });
 
         const list = await listDebtsByContact(user.id, contactId, status);
+        const hasActive = await contactHasActiveDebt(user.id, contactId);
         const { slice, page: p, totalPages, total } = paginate(list, page);
         const title = t(user.language, "people_contact_debts", { name: contact.name });
         const statusLabel = status === "open" ? t(user.language, "open_debts") : t(user.language, "closed_debts");
@@ -489,6 +491,7 @@ export async function showContactDebts(
                 p,
                 totalPages,
                 contact.hide_when_zero,
+                !hasActive,
             ),
         );
     } catch (error) {
@@ -508,7 +511,17 @@ export async function onToggleHideWhenZero(ctx: CTX, contactId: number) {
         }
 
         const next = !contact.hide_when_zero;
-        await setContactHideWhenZero(contactId, user.id, next);
+        const result = await setContactHideWhenZero(contactId, user.id, next);
+        if (!result.ok) {
+            const msg =
+                result.reason === "has_active"
+                    ? t(user.language, "hide_when_zero_denied")
+                    : t(user.language, "no_permission");
+            await ctx.answerCallbackQuery({ text: msg }).catch(() => undefined);
+            await showContactDebts(ctx, contactId, "open", 0);
+            return;
+        }
+
         await ctx
             .answerCallbackQuery({
                 text: t(user.language, next ? "hide_when_zero_set_on" : "hide_when_zero_set_off"),
