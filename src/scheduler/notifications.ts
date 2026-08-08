@@ -51,10 +51,7 @@ export async function sendDueNotifications(): Promise<void> {
             if (!owner || owner.status === "has_blocked") continue;
 
             if (owner.notify_time !== now) continue;
-
-            const allowed =
-                debt.direction === "borrowed" ? owner.notify_borrow : owner.notify_lend;
-            if (!allowed) continue;
+            if (!owner.notify_enabled) continue;
 
             if (await alreadyNotified(debt.id, owner.id, today)) continue;
 

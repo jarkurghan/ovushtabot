@@ -17,9 +17,28 @@ async function main() {
     `;
 
     await sql`
-        ALTER TABLE contacts
-        ADD COLUMN IF NOT EXISTS hide_when_zero boolean NOT NULL DEFAULT false
+    ALTER TABLE contacts
+    ADD COLUMN IF NOT EXISTS hide_when_zero boolean NOT NULL DEFAULT false
     `;
+
+    // Bitta eslatma flag — notify_borrow / notify_lend o'rniga
+    await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS notify_enabled boolean NOT NULL DEFAULT true
+    `;
+    await sql`
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'notify_borrow'
+        ) THEN
+            UPDATE users SET notify_enabled = (notify_borrow OR notify_lend);
+        END IF;
+    END $$
+    `;
+    await sql`ALTER TABLE users DROP COLUMN IF EXISTS notify_borrow`;
+    await sql`ALTER TABLE users DROP COLUMN IF EXISTS notify_lend`;
 
     await sql.end({ timeout: 5 });
     console.log("Migration completed");

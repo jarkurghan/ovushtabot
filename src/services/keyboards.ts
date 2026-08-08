@@ -211,18 +211,15 @@ export function debtDetailKeyboard(
     return kb;
 }
 
-export function settingsKeyboard(lang: Lang, user: { notify_borrow: boolean; notify_lend: boolean; notify_time: string; language: Lang }) {
-    const borrowState = user.notify_borrow ? t(lang, "on") : t(lang, "off");
-    const lendState = user.notify_lend ? t(lang, "on") : t(lang, "off");
+export function settingsKeyboard(lang: Lang, user: { notify_enabled: boolean; notify_time: string; language: Lang }) {
+    const notifyState = user.notify_enabled ? t(lang, "on") : t(lang, "off");
 
     return new InlineKeyboard()
         .text(`${t(lang, "settings_lang")}: ${user.language === "cyrl" ? "Кирилл" : "Lotin"}`, "settings_lang")
         .row()
         .text(`${t(lang, "settings_notify_time")}: ${user.notify_time}`, "settings_time")
         .row()
-        .text(`${t(lang, "settings_notify_borrow")}: ${borrowState}`, "toggle_borrow")
-        .row()
-        .text(`${t(lang, "settings_notify_lend")}: ${lendState}`, "toggle_lend")
+        .text(`${t(lang, "settings_notify")}: ${notifyState}`, "toggle_notify")
         .row()
         .text(t(lang, "btn_done"), "menu");
 }

@@ -19,16 +19,14 @@ export interface User {
     username: string | null;
     language: Lang;
     notify_time: string;
-    notify_borrow: boolean;
-    notify_lend: boolean;
+    notify_enabled: boolean;
     status: Status;
 }
 
 export type SaveUserData = {
     language?: Lang;
     notify_time?: string;
-    notify_borrow?: boolean;
-    notify_lend?: boolean;
+    notify_enabled?: boolean;
     status?: Status;
     utm?: string;
 };

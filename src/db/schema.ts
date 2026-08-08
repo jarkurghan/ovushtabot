@@ -22,8 +22,7 @@ export const users = pgTable(
         username: text("username"),
         language: text("language", { enum: ["uz", "cyrl"] }).default("uz").notNull(),
         notify_time: varchar("notify_time", { length: 5 }).default("09:00").notNull(),
-        notify_borrow: boolean("notify_borrow").default(true).notNull(),
-        notify_lend: boolean("notify_lend").default(true).notNull(),
+        notify_enabled: boolean("notify_enabled").default(true).notNull(),
         status: text("status", {
             enum: ["new", "active", "inactive", "deleted_account", "has_blocked", "other"],
         })

@@ -18,8 +18,7 @@ export function mapDbUser(row: UserSelect): User {
         username: row.username ?? null,
         language: (row.language as Lang) || "uz",
         notify_time: row.notify_time || "09:00",
-        notify_borrow: row.notify_borrow ?? true,
-        notify_lend: row.notify_lend ?? true,
+        notify_enabled: row.notify_enabled ?? true,
         status: row.status as Status,
     };
 }
@@ -59,8 +58,7 @@ export async function saveUser(ctx: CTX, data?: SaveUserData): Promise<User[]> {
 
     if (data?.language) patch.language = data.language;
     if (data?.notify_time) patch.notify_time = data.notify_time;
-    if (typeof data?.notify_borrow === "boolean") patch.notify_borrow = data.notify_borrow;
-    if (typeof data?.notify_lend === "boolean") patch.notify_lend = data.notify_lend;
+    if (typeof data?.notify_enabled === "boolean") patch.notify_enabled = data.notify_enabled;
     if (data?.status) patch.status = data.status;
 
     try {
@@ -96,8 +94,7 @@ export async function saveUser(ctx: CTX, data?: SaveUserData): Promise<User[]> {
         };
         if (data?.language) updateData.language = data.language;
         if (data?.notify_time) updateData.notify_time = data.notify_time;
-        if (typeof data?.notify_borrow === "boolean") updateData.notify_borrow = data.notify_borrow;
-        if (typeof data?.notify_lend === "boolean") updateData.notify_lend = data.notify_lend;
+        if (typeof data?.notify_enabled === "boolean") updateData.notify_enabled = data.notify_enabled;
         if (data?.status) updateData.status = data.status;
 
         // Blokdan qaytganda active qilish

@@ -22,8 +22,7 @@ export async function showSettings(ctx: CTX) {
             "",
             `${t(user.language, "settings_lang")}: ${user.language === "cyrl" ? "Кирилл" : "Lotin"}`,
             `${t(user.language, "settings_notify_time")}: ${user.notify_time}`,
-            `${t(user.language, "settings_notify_borrow")}: ${user.notify_borrow ? t(user.language, "on") : t(user.language, "off")}`,
-            `${t(user.language, "settings_notify_lend")}: ${user.notify_lend ? t(user.language, "on") : t(user.language, "off")}`,
+            `${t(user.language, "settings_notify")}: ${user.notify_enabled ? t(user.language, "on") : t(user.language, "off")}`,
         ].join("\n");
 
         if (ctx.callbackQuery) {
@@ -67,17 +66,12 @@ export async function onSelectLang(ctx: CTX) {
     }
 }
 
-export async function onToggleNotify(ctx: CTX, kind: "borrow" | "lend") {
+export async function onToggleNotify(ctx: CTX) {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
 
-        const patch =
-            kind === "borrow"
-                ? { notify_borrow: !user.notify_borrow }
-                : { notify_lend: !user.notify_lend };
-
-        await saveUser(ctx, patch);
+        await saveUser(ctx, { notify_enabled: !user.notify_enabled });
         await showSettings(ctx);
     } catch (error) {
         await sendErrorLog({ event: "Notify toggle", error, ctx });

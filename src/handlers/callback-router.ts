@@ -160,13 +160,8 @@ export async function registerCallbackRouter(ctx: CTX) {
             return;
         }
 
-        if (data === "toggle_borrow") {
-            await onToggleNotify(ctx, "borrow");
-            return;
-        }
-
-        if (data === "toggle_lend") {
-            await onToggleNotify(ctx, "lend");
+        if (data === "toggle_notify") {
+            await onToggleNotify(ctx);
             return;
         }
 
