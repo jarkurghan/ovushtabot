@@ -2,7 +2,7 @@ import { InlineKeyboard, Keyboard } from "grammy";
 import { t } from "../i18n";
 import type { Lang } from "../utils/types";
 import type { ContactSummary, DebtWithMeta } from "./debts";
-import { escapeHtml, formatAmount, formatDate } from "../utils/format";
+import { escapeHtml, formatAmount, formatContactName, formatDate } from "../utils/format";
 import { pageCallback } from "../utils/paginate";
 
 export function mainReplyKeyboard(lang: Lang) {
@@ -99,7 +99,7 @@ export function contactPickerKeyboard(
 ) {
     const kb = new InlineKeyboard();
     for (const c of contactsList) {
-        kb.text(c.name.slice(0, 60), `cpick_${c.id}`).row();
+        kb.text(formatContactName(c.name).slice(0, 60), `cpick_${c.id}`).row();
     }
     appendPageNav(kb, lang, "cpick", page, totalPages);
     kb.text(t(lang, "btn_cancel"), "cancel");

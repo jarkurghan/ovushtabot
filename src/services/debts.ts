@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { contacts, debtItems, debts, shares } from "../db/schema";
 import { db } from "../db";
+import { formatContactName, normalizeContactName } from "../utils/format";
 import type { Direction, User } from "../utils/types";
 
 export type DebtWithMeta = {
@@ -52,6 +53,7 @@ function mapDebtRows(
 ): DebtWithMeta[] {
     return rows.map((r) => ({
         ...r,
+        contact_name: formatContactName(r.contact_name),
         direction: r.direction as Direction,
         status: r.status as "open" | "closed",
         linked_debt_id: r.linked_debt_id ?? null,
@@ -117,7 +119,7 @@ async function enrichDebtRows(
 }
 
 export async function getOrCreateContact(ownerId: number, name: string, linkedUserId?: number | null) {
-    const trimmed = name.trim().replace(/\s+/g, " ");
+    const stored = normalizeContactName(name);
 
     if (linkedUserId) {
         const [byLink] = await db
@@ -131,7 +133,7 @@ export async function getOrCreateContact(ownerId: number, name: string, linkedUs
     const [existing] = await db
         .select()
         .from(contacts)
-        .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, trimmed)))
+        .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, stored)))
         .limit(1);
 
     if (existing) {
@@ -150,7 +152,7 @@ export async function getOrCreateContact(ownerId: number, name: string, linkedUs
         .insert(contacts)
         .values({
             owner_id: ownerId,
-            name: trimmed,
+            name: stored,
             linked_user_id: linkedUserId ?? null,
         })
         .returning();
@@ -264,25 +266,25 @@ export async function renameContact(
     ownerId: number,
     newName: string,
 ): Promise<RenameContactResult> {
-    const trimmed = newName.trim().replace(/\s+/g, " ");
-    if (trimmed.length < 1 || trimmed.length > 80) {
+    const stored = normalizeContactName(newName);
+    if (stored.length < 1 || stored.length > 80) {
         return { ok: false, reason: "invalid" };
     }
 
     const contact = await getContactById(contactId, ownerId);
     if (!contact) return { ok: false, reason: "not_found" };
-    if (contact.name === trimmed) return { ok: true, contact };
+    if (contact.name === stored) return { ok: true, contact };
 
     const [dup] = await db
         .select()
         .from(contacts)
-        .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, trimmed)))
+        .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, stored)))
         .limit(1);
     if (dup) return { ok: false, reason: "taken" };
 
     const [updated] = await db
         .update(contacts)
-        .set({ name: trimmed })
+        .set({ name: stored })
         .where(and(eq(contacts.id, contactId), eq(contacts.owner_id, ownerId)))
         .returning();
 
@@ -335,7 +337,7 @@ export async function listContactSummaries(ownerId: number): Promise<ContactSumm
 
     return known.map((c) => ({
         id: c.id,
-        name: c.name,
+        name: formatContactName(c.name),
         borrowedBalance: borrowedByContact.get(c.id) ?? 0,
         lentBalance: lentByContact.get(c.id) ?? 0,
         openCount: openByContact.get(c.id) ?? 0,
@@ -396,10 +398,6 @@ function flipDirection(direction: Direction): Direction {
     return direction === "borrowed" ? "lent" : "borrowed";
 }
 
-function normName(name: string): string {
-    return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
 /**
  * Shu tanish + SHU yo'nalishdagi ochiq qarz (merge uchun).
  * Teskari yo'nalish (oldim vs berdim) hech qachon birlashtirilmaydi.
@@ -410,13 +408,12 @@ export async function findOpenDebtId(
     direction: Direction,
     contactId?: number | null,
 ): Promise<number | null> {
-    const trimmed = contactName.trim().replace(/\s+/g, " ");
-    const needle = normName(trimmed);
+    const needle = normalizeContactName(contactName);
 
     const ownerContacts = await db.select().from(contacts).where(eq(contacts.owner_id, ownerId));
 
     const matched = ownerContacts.filter(
-        (c) => c.id === contactId || c.name === trimmed || normName(c.name) === needle,
+        (c) => c.id === contactId || normalizeContactName(c.name) === needle,
     );
 
     const contactIds = new Set(matched.map((c) => c.id));

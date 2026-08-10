@@ -46,7 +46,9 @@ import {
     addMonthsInTashkent,
     firstOfNextMonthInTashkent,
     formatAmount,
+    formatContactName,
     formatDate,
+    normalizeContactName,
     parseAmount,
     parseDate,
     todayInTashkent,
@@ -473,7 +475,7 @@ export async function showContactDebts(
         const list = await listDebtsByContact(user.id, contactId, status);
         const hasActive = await contactHasActiveDebt(user.id, contactId);
         const { slice, page: p, totalPages, total } = paginate(list, page);
-        const title = t(user.language, "people_contact_debts", { name: contact.name });
+        const title = t(user.language, "people_contact_debts", { name: formatContactName(contact.name) });
         const statusLabel = status === "open" ? t(user.language, "open_debts") : t(user.language, "closed_debts");
         const suffix = totalPages > 1 ? t(user.language, "list_page_suffix", { page: p + 1, total: totalPages }) : "";
         const text = total
@@ -553,7 +555,7 @@ export async function onRenameContactStart(ctx: CTX, contactId: number) {
         });
 
         await ctx.answerCallbackQuery().catch(() => undefined);
-        await ctx.reply(t(user.language, "ask_rename_contact", { name: contact.name }), {
+        await ctx.reply(t(user.language, "ask_rename_contact", { name: formatContactName(contact.name) }), {
             parse_mode: "HTML",
             reply_markup: cancelKeyboard(user.language),
         });
@@ -914,7 +916,7 @@ export async function handleTextMessage(ctx: CTX) {
             }
 
             const contactId = result.contact.id;
-            await ctx.reply(t(lang, "contact_renamed", { name: result.contact.name }), {
+            await ctx.reply(t(lang, "contact_renamed", { name: formatContactName(result.contact.name) }), {
                 parse_mode: "HTML",
             });
             await showContactDebts(ctx, contactId, "open");
@@ -964,8 +966,9 @@ export async function handleTextMessage(ctx: CTX) {
 
         if (session.step === "add_contact_name") {
             const known = await listContacts(user.id);
-            const matched = known.find((c) => c.name === text);
-            const contactName = matched?.name ?? text;
+            const stored = normalizeContactName(text);
+            const matched = known.find((c) => c.name === stored);
+            const contactName = matched?.name ?? stored;
 
             if (contactName.length < 1 || contactName.length > 80) {
                 await ctx.reply(t(lang, "ask_contact"));

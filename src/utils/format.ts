@@ -120,3 +120,21 @@ export function nowTimeInTashkent(): string {
 export function escapeHtml(text: string): string {
     return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
+
+/** DB ga yozish: trim + lowercase (case-insensitive unique) */
+export function normalizeContactName(input: string): string {
+    return input.trim().replace(/\s+/g, " ").toLocaleLowerCase("uz");
+}
+
+/** UI: har so'zning 1-harfi katta */
+export function formatContactName(name: string): string {
+    const normalized = name.trim().replace(/\s+/g, " ");
+    if (!normalized) return normalized;
+    return normalized
+        .split(" ")
+        .map((word) => {
+            if (!word) return word;
+            return word.charAt(0).toLocaleUpperCase("uz") + word.slice(1).toLocaleLowerCase("uz");
+        })
+        .join(" ");
+}
