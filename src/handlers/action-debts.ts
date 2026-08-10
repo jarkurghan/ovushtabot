@@ -49,6 +49,7 @@ import {
     formatContactName,
     formatDate,
     normalizeContactName,
+    contactNameHasForbiddenChars,
     parseAmount,
     parseDate,
     todayInTashkent,
@@ -909,6 +910,10 @@ export async function handleTextMessage(ctx: CTX) {
                     await ctx.reply(t(lang, "contact_name_taken"), { reply_markup: cancelKeyboard(lang) });
                     return;
                 }
+                if (contactNameHasForbiddenChars(text)) {
+                    await ctx.reply(t(lang, "invalid_contact_name"), { reply_markup: cancelKeyboard(lang) });
+                    return;
+                }
                 await ctx.reply(`${t(lang, "ask_contact")}\n${t(lang, "contact_hint")}`, {
                     reply_markup: cancelKeyboard(lang),
                 });
@@ -965,6 +970,10 @@ export async function handleTextMessage(ctx: CTX) {
         }
 
         if (session.step === "add_contact_name") {
+            if (contactNameHasForbiddenChars(text)) {
+                await ctx.reply(t(lang, "invalid_contact_name"), { reply_markup: cancelKeyboard(lang) });
+                return;
+            }
             const known = await listContacts(user.id);
             const stored = normalizeContactName(text);
             const matched = known.find((c) => c.name === stored);

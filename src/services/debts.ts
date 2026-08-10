@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { contacts, debtItems, debts, shares } from "../db/schema";
 import { db } from "../db";
-import { formatContactName, normalizeContactName } from "../utils/format";
+import { formatContactName, normalizeContactName, contactNameHasForbiddenChars } from "../utils/format";
 import type { Direction, User } from "../utils/types";
 
 export type DebtWithMeta = {
@@ -266,6 +266,9 @@ export async function renameContact(
     ownerId: number,
     newName: string,
 ): Promise<RenameContactResult> {
+    if (contactNameHasForbiddenChars(newName)) {
+        return { ok: false, reason: "invalid" };
+    }
     const stored = normalizeContactName(newName);
     if (stored.length < 1 || stored.length > 80) {
         return { ok: false, reason: "invalid" };

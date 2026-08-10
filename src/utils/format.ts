@@ -126,6 +126,11 @@ export function normalizeContactName(input: string): string {
     return input.trim().replace(/\s+/g, " ").toLocaleLowerCase("uz");
 }
 
+/** User kiritgan ismda HTML-xavfli belgilar bormi */
+export function contactNameHasForbiddenChars(input: string): boolean {
+    return /[<>&]/.test(input);
+}
+
 /** UI: har so'zning 1-harfi katta */
 export function formatContactName(name: string): string {
     const normalized = name.trim().replace(/\s+/g, " ");
