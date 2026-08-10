@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { contacts, debtItems, debts, shares } from "../db/schema";
-import { db } from "../db";
+import { db, runInTransaction, type DbExecutor } from "../db";
 import { formatContactName, normalizeContactName, contactNameHasForbiddenChars } from "../utils/format";
 import type { Direction, User } from "../utils/types";
 
@@ -62,11 +62,11 @@ function mapDebtRows(
     }));
 }
 
-async function balanceForDebtIds(debtIds: number[]): Promise<Map<number, number>> {
+async function balanceForDebtIds(debtIds: number[], exec: DbExecutor = db): Promise<Map<number, number>> {
     const map = new Map<number, number>();
     if (!debtIds.length) return map;
 
-    const rows = await db
+    const rows = await exec
         .select({
             debt_id: debtItems.debt_id,
             balance: sql<number>`coalesce(sum(case when ${debtItems.type} = 'charge' then ${debtItems.amount} else -${debtItems.amount} end), 0)`.mapWith(Number),
@@ -80,11 +80,11 @@ async function balanceForDebtIds(debtIds: number[]): Promise<Map<number, number>
 }
 
 /** Har bir qarzning eng birinchi charge summasi */
-async function firstChargeForDebtIds(debtIds: number[]): Promise<Map<number, number>> {
+async function firstChargeForDebtIds(debtIds: number[], exec: DbExecutor = db): Promise<Map<number, number>> {
     const map = new Map<number, number>();
     if (!debtIds.length) return map;
 
-    const rows = await db
+    const rows = await exec
         .select({
             debt_id: debtItems.debt_id,
             amount: debtItems.amount,
@@ -112,17 +112,26 @@ async function enrichDebtRows(
         linked_debt_id: number | null;
         created_at: Date;
     }>,
+    exec: DbExecutor = db,
 ): Promise<DebtWithMeta[]> {
     const ids = rows.map((r) => r.id);
-    const [balances, initials] = await Promise.all([balanceForDebtIds(ids), firstChargeForDebtIds(ids)]);
+    const [balances, initials] = await Promise.all([
+        balanceForDebtIds(ids, exec),
+        firstChargeForDebtIds(ids, exec),
+    ]);
     return mapDebtRows(rows, balances, initials);
 }
 
-export async function getOrCreateContact(ownerId: number, name: string, linkedUserId?: number | null) {
+export async function getOrCreateContact(
+    ownerId: number,
+    name: string,
+    linkedUserId?: number | null,
+    exec: DbExecutor = db,
+) {
     const stored = normalizeContactName(name);
 
     if (linkedUserId) {
-        const [byLink] = await db
+        const [byLink] = await exec
             .select()
             .from(contacts)
             .where(and(eq(contacts.owner_id, ownerId), eq(contacts.linked_user_id, linkedUserId)))
@@ -130,7 +139,7 @@ export async function getOrCreateContact(ownerId: number, name: string, linkedUs
         if (byLink) return byLink;
     }
 
-    const [existing] = await db
+    const [existing] = await exec
         .select()
         .from(contacts)
         .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, stored)))
@@ -138,7 +147,7 @@ export async function getOrCreateContact(ownerId: number, name: string, linkedUs
 
     if (existing) {
         if (linkedUserId && !existing.linked_user_id) {
-            const [updated] = await db
+            const [updated] = await exec
                 .update(contacts)
                 .set({ linked_user_id: linkedUserId })
                 .where(eq(contacts.id, existing.id))
@@ -148,7 +157,7 @@ export async function getOrCreateContact(ownerId: number, name: string, linkedUs
         return existing;
     }
 
-    const [created] = await db
+    const [created] = await exec
         .insert(contacts)
         .values({
             owner_id: ownerId,
@@ -197,8 +206,11 @@ export async function contactHasActiveDebt(ownerId: number, contactId: number): 
 }
 
 /** Yangi/qayta ochilgan qarzda «ovushmayman» avtomatik o'chadi */
-export async function clearHideWhenZeroForContact(contactId: number): Promise<void> {
-    await db
+export async function clearHideWhenZeroForContact(
+    contactId: number,
+    exec: DbExecutor = db,
+): Promise<void> {
+    await exec
         .update(contacts)
         .set({ hide_when_zero: false })
         .where(and(eq(contacts.id, contactId), eq(contacts.hide_when_zero, true)));
@@ -248,8 +260,8 @@ export async function setContactHideWhenZero(
     return { ok: true, contact: updated };
 }
 
-export async function getContactById(contactId: number, ownerId: number) {
-    const [row] = await db
+export async function getContactById(contactId: number, ownerId: number, exec: DbExecutor = db) {
+    const [row] = await exec
         .select()
         .from(contacts)
         .where(and(eq(contacts.id, contactId), eq(contacts.owner_id, ownerId)))
@@ -363,10 +375,13 @@ export async function listDebtsByContact(
 }
 
 /** Kontakt avval ulashilgan bo'lsa — linked user; yo'q bo'lsa eski twin dan tiklaydi */
-async function resolveContactLinkedUserId(contact: typeof contacts.$inferSelect): Promise<number | null> {
+async function resolveContactLinkedUserId(
+    contact: typeof contacts.$inferSelect,
+    exec: DbExecutor = db,
+): Promise<number | null> {
     if (contact.linked_user_id) return contact.linked_user_id;
 
-    const [row] = await db
+    const [row] = await exec
         .select({ linked_debt_id: debts.linked_debt_id })
         .from(debts)
         .where(and(eq(debts.contact_id, contact.id), sql`${debts.linked_debt_id} is not null`))
@@ -375,10 +390,10 @@ async function resolveContactLinkedUserId(contact: typeof contacts.$inferSelect)
 
     if (!row?.linked_debt_id) return null;
 
-    const twin = await getDebtById(row.linked_debt_id);
+    const twin = await getDebtById(row.linked_debt_id, exec);
     if (!twin) return null;
 
-    await db.update(contacts).set({ linked_user_id: twin.owner_id }).where(eq(contacts.id, contact.id));
+    await exec.update(contacts).set({ linked_user_id: twin.owner_id }).where(eq(contacts.id, contact.id));
     return twin.owner_id;
 }
 
@@ -410,10 +425,11 @@ export async function findOpenDebtId(
     contactName: string,
     direction: Direction,
     contactId?: number | null,
+    exec: DbExecutor = db,
 ): Promise<number | null> {
     const needle = normalizeContactName(contactName);
 
-    const ownerContacts = await db.select().from(contacts).where(eq(contacts.owner_id, ownerId));
+    const ownerContacts = await exec.select().from(contacts).where(eq(contacts.owner_id, ownerId));
 
     const matched = ownerContacts.filter(
         (c) => c.id === contactId || normalizeContactName(c.name) === needle,
@@ -426,7 +442,7 @@ export async function findOpenDebtId(
 
     for (const c of matched) {
         if (c.linked_user_id) continue;
-        const peer = await resolveContactLinkedUserId(c);
+        const peer = await resolveContactLinkedUserId(c, exec);
         if (peer && peer !== ownerId) peerIds.add(peer);
     }
 
@@ -435,7 +451,7 @@ export async function findOpenDebtId(
     }
 
     if (contactIds.size > 0) {
-        const [sameDir] = await db
+        const [sameDir] = await exec
             .select({ id: debts.id })
             .from(debts)
             .where(
@@ -453,7 +469,7 @@ export async function findOpenDebtId(
 
     // Peer twin orqali — faqat o'z tomonda shu yo'nalishdagi juft
     for (const peerUserId of peerIds) {
-        const [oursDirect] = await db
+        const [oursDirect] = await exec
             .select({ id: debts.id })
             .from(debts)
             .innerJoin(contacts, eq(contacts.id, debts.contact_id))
@@ -469,7 +485,7 @@ export async function findOpenDebtId(
             .limit(1);
         if (oursDirect) return oursDirect.id;
 
-        const peerOpenRows = await db
+        const peerOpenRows = await exec
             .select({ linked_debt_id: debts.linked_debt_id })
             .from(debts)
             .innerJoin(contacts, eq(contacts.id, debts.contact_id))
@@ -485,7 +501,7 @@ export async function findOpenDebtId(
 
         for (const peerDebt of peerOpenRows) {
             if (!peerDebt.linked_debt_id) continue;
-            const ours = await getDebtById(peerDebt.linked_debt_id);
+            const ours = await getDebtById(peerDebt.linked_debt_id, exec);
             if (ours && ours.owner_id === ownerId && ours.direction === direction) {
                 return ours.id;
             }
@@ -504,131 +520,139 @@ export async function createDebt(params: {
     createdBy: number;
     contactId?: number | null;
     note?: string | null;
+    /** Nested chaqiriq (repayDebt va h.k.) uchun mavjud transaction */
+    exec?: DbExecutor;
 }): Promise<CreateDebtResult> {
-    const itemNote = params.note?.trim() ? params.note.trim() : null;
-    const contact = params.contactId
-        ? ((await getContactById(params.contactId, params.ownerId)) ??
-          (await getOrCreateContact(params.ownerId, params.contactName)))
-        : await getOrCreateContact(params.ownerId, params.contactName);
+    return runInTransaction(async (tx) => {
+        const itemNote = params.note?.trim() ? params.note.trim() : null;
+        const contact = params.contactId
+            ? ((await getContactById(params.contactId, params.ownerId, tx)) ??
+              (await getOrCreateContact(params.ownerId, params.contactName, null, tx)))
+            : await getOrCreateContact(params.ownerId, params.contactName, null, tx);
 
-    // Bir xil yo'nalishdagi ochiq qarz → charge; teskari ochiq qarz → repay (yangisi ochilmaydi)
-    const sameDirId = await findOpenDebtId(
-        params.ownerId,
-        params.contactName,
-        params.direction,
-        contact.id,
-    );
-    const oppositeDirId = sameDirId
-        ? null
-        : await findOpenDebtId(
-              params.ownerId,
-              params.contactName,
-              flipDirection(params.direction),
-              contact.id,
-          );
+        // Bir xil yo'nalishdagi ochiq qarz → charge; teskari ochiq qarz → repay (yangisi ochilmaydi)
+        const sameDirId = await findOpenDebtId(
+            params.ownerId,
+            params.contactName,
+            params.direction,
+            contact.id,
+            tx,
+        );
+        const oppositeDirId = sameDirId
+            ? null
+            : await findOpenDebtId(
+                  params.ownerId,
+                  params.contactName,
+                  flipDirection(params.direction),
+                  contact.id,
+                  tx,
+              );
 
-    const createFresh = async (amount: number, dueDate?: string | null): Promise<DebtWithMeta> => {
-        const [debt] = await db
-            .insert(debts)
-            .values({
-                owner_id: params.ownerId,
-                contact_id: contact.id,
-                direction: params.direction,
-                due_date: dueDate || null,
-                status: "open",
-            })
-            .returning();
+        const createFresh = async (amount: number, dueDate?: string | null): Promise<DebtWithMeta> => {
+            const [debt] = await tx
+                .insert(debts)
+                .values({
+                    owner_id: params.ownerId,
+                    contact_id: contact.id,
+                    direction: params.direction,
+                    due_date: dueDate || null,
+                    status: "open",
+                })
+                .returning();
 
-        await db.insert(debtItems).values({
-            debt_id: debt.id,
-            type: "charge",
-            amount,
-            created_by: params.createdBy,
-            note: itemNote,
-        });
-        await clearHideWhenZeroForContact(contact.id);
-
-        const peerUserId = await resolveContactLinkedUserId(contact);
-        if (peerUserId && peerUserId !== params.ownerId) {
-            const { ensureTwinDebt } = await import("./debt-link");
-            await ensureTwinDebt(debt.id, peerUserId);
-        }
-
-        const created = await getDebtById(debt.id);
-        if (!created) throw new Error("createDebt: fresh debt missing");
-        return created;
-    };
-
-    if (sameDirId) {
-        const existing = await getDebtById(sameDirId);
-        if (!existing) throw new Error("createDebt merge: debt missing");
-        if (existing.status === "closed") {
-            await db.update(debts).set({ status: "open" }).where(eq(debts.id, sameDirId));
-        }
-        await addDebtItem({
-            debtId: sameDirId,
-            type: "charge",
-            amount: params.amount,
-            createdBy: params.createdBy,
-            note: itemNote,
-        });
-        if (params.dueDate) {
-            await setDueDate(sameDirId, params.dueDate);
-        }
-        const debt = await getDebtById(sameDirId);
-        if (!debt) throw new Error("createDebt merge: debt missing after charge");
-        return { debt, merged: true, mergeType: "charge", amount: params.amount };
-    }
-
-    if (oppositeDirId) {
-        // Teskari yo'nalish: avval eski qarzdan qaytarish, ortiqcha bo'lsa yangi yo'nalishda qarz
-        const existing = await getDebtById(oppositeDirId);
-        if (!existing) throw new Error("createDebt opposite: debt missing");
-        const bal = existing.balance > 0 ? existing.balance : 0;
-        const repayAmount = Math.min(params.amount, bal);
-        const remainder = params.amount - repayAmount;
-
-        let closed = false;
-        if (repayAmount > 0) {
-            const result = await addDebtItem({
-                debtId: oppositeDirId,
-                type: "repay",
-                amount: repayAmount,
-                createdBy: params.createdBy,
+            await tx.insert(debtItems).values({
+                debt_id: debt.id,
+                type: "charge",
+                amount,
+                created_by: params.createdBy,
                 note: itemNote,
             });
-            closed = result.closed;
+            await clearHideWhenZeroForContact(contact.id, tx);
+
+            const peerUserId = await resolveContactLinkedUserId(contact, tx);
+            if (peerUserId && peerUserId !== params.ownerId) {
+                const { ensureTwinDebt } = await import("./debt-link");
+                await ensureTwinDebt(debt.id, peerUserId, tx);
+            }
+
+            const created = await getDebtById(debt.id, tx);
+            if (!created) throw new Error("createDebt: fresh debt missing");
+            return created;
+        };
+
+        if (sameDirId) {
+            const existing = await getDebtById(sameDirId, tx);
+            if (!existing) throw new Error("createDebt merge: debt missing");
+            if (existing.status === "closed") {
+                await tx.update(debts).set({ status: "open" }).where(eq(debts.id, sameDirId));
+            }
+            await addDebtItem({
+                debtId: sameDirId,
+                type: "charge",
+                amount: params.amount,
+                createdBy: params.createdBy,
+                note: itemNote,
+                exec: tx,
+            });
+            if (params.dueDate) {
+                await setDueDate(sameDirId, params.dueDate, false, tx);
+            }
+            const debt = await getDebtById(sameDirId, tx);
+            if (!debt) throw new Error("createDebt merge: debt missing after charge");
+            return { debt, merged: true, mergeType: "charge", amount: params.amount };
         }
 
-        const afterRepay = await getDebtById(oppositeDirId);
-        if (!afterRepay) throw new Error("createDebt opposite: debt missing after repay");
+        if (oppositeDirId) {
+            // Teskari yo'nalish: avval eski qarzdan qaytarish, ortiqcha bo'lsa yangi yo'nalishda qarz
+            const existing = await getDebtById(oppositeDirId, tx);
+            if (!existing) throw new Error("createDebt opposite: debt missing");
+            const bal = existing.balance > 0 ? existing.balance : 0;
+            const repayAmount = Math.min(params.amount, bal);
+            const remainder = params.amount - repayAmount;
 
-        if (remainder > 0) {
-            const remainderDebt = await createFresh(remainder, params.dueDate ?? null);
+            let closed = false;
+            if (repayAmount > 0) {
+                const result = await addDebtItem({
+                    debtId: oppositeDirId,
+                    type: "repay",
+                    amount: repayAmount,
+                    createdBy: params.createdBy,
+                    note: itemNote,
+                    exec: tx,
+                });
+                closed = result.closed;
+            }
+
+            const afterRepay = await getDebtById(oppositeDirId, tx);
+            if (!afterRepay) throw new Error("createDebt opposite: debt missing after repay");
+
+            if (remainder > 0) {
+                const remainderDebt = await createFresh(remainder, params.dueDate ?? null);
+                return {
+                    debt: remainderDebt,
+                    merged: true,
+                    mergeType: "net",
+                    amount: repayAmount,
+                    closed,
+                    remainderDebt,
+                    remainderAmount: remainder,
+                    settledDebtId: oppositeDirId,
+                };
+            }
+
             return {
-                debt: remainderDebt,
+                debt: afterRepay,
                 merged: true,
-                mergeType: "net",
+                mergeType: "repay",
                 amount: repayAmount,
                 closed,
-                remainderDebt,
-                remainderAmount: remainder,
                 settledDebtId: oppositeDirId,
             };
         }
 
-        return {
-            debt: afterRepay,
-            merged: true,
-            mergeType: "repay",
-            amount: repayAmount,
-            closed,
-            settledDebtId: oppositeDirId,
-        };
-    }
-
-    const created = await createFresh(params.amount, params.dueDate ?? null);
-    return { debt: created, merged: false, amount: params.amount };
+        const created = await createFresh(params.amount, params.dueDate ?? null);
+        return { debt: created, merged: false, amount: params.amount };
+    }, params.exec);
 }
 
 export async function addDebtItem(params: {
@@ -639,50 +663,58 @@ export async function addDebtItem(params: {
     note?: string | null;
     /** Twin ga qayta sync qilmaslik (loop oldini olish) */
     skipTwinSync?: boolean;
+    exec?: DbExecutor;
 }): Promise<{ balance: number; closed: boolean }> {
-    await db.insert(debtItems).values({
-        debt_id: params.debtId,
-        type: params.type,
-        amount: params.amount,
-        created_by: params.createdBy,
-        note: params.note || null,
-    });
+    return runInTransaction(async (tx) => {
+        await tx.insert(debtItems).values({
+            debt_id: params.debtId,
+            type: params.type,
+            amount: params.amount,
+            created_by: params.createdBy,
+            note: params.note || null,
+        });
 
-    if (params.type === "charge") {
-        const [debtRow] = await db
-            .select({ contact_id: debts.contact_id })
-            .from(debts)
-            .where(eq(debts.id, params.debtId))
-            .limit(1);
-        if (debtRow) await clearHideWhenZeroForContact(debtRow.contact_id);
-    }
-
-    const balances = await balanceForDebtIds([params.debtId]);
-    const balance = balances.get(params.debtId) ?? 0;
-
-    let closed = false;
-    if (balance <= 0) {
-        await db.update(debts).set({ status: "closed" }).where(eq(debts.id, params.debtId));
-        closed = true;
-    } else {
-        await db.update(debts).set({ status: "open" }).where(eq(debts.id, params.debtId));
-    }
-
-    if (!params.skipTwinSync) {
-        const [row] = await db.select({ linked_debt_id: debts.linked_debt_id }).from(debts).where(eq(debts.id, params.debtId)).limit(1);
-        if (row?.linked_debt_id) {
-            await addDebtItem({
-                debtId: row.linked_debt_id,
-                type: params.type,
-                amount: params.amount,
-                createdBy: params.createdBy,
-                note: params.note,
-                skipTwinSync: true,
-            });
+        if (params.type === "charge") {
+            const [debtRow] = await tx
+                .select({ contact_id: debts.contact_id })
+                .from(debts)
+                .where(eq(debts.id, params.debtId))
+                .limit(1);
+            if (debtRow) await clearHideWhenZeroForContact(debtRow.contact_id, tx);
         }
-    }
 
-    return { balance: Math.max(balance, 0), closed };
+        const balances = await balanceForDebtIds([params.debtId], tx);
+        const balance = balances.get(params.debtId) ?? 0;
+
+        let closed = false;
+        if (balance <= 0) {
+            await tx.update(debts).set({ status: "closed" }).where(eq(debts.id, params.debtId));
+            closed = true;
+        } else {
+            await tx.update(debts).set({ status: "open" }).where(eq(debts.id, params.debtId));
+        }
+
+        if (!params.skipTwinSync) {
+            const [row] = await tx
+                .select({ linked_debt_id: debts.linked_debt_id })
+                .from(debts)
+                .where(eq(debts.id, params.debtId))
+                .limit(1);
+            if (row?.linked_debt_id) {
+                await addDebtItem({
+                    debtId: row.linked_debt_id,
+                    type: params.type,
+                    amount: params.amount,
+                    createdBy: params.createdBy,
+                    note: params.note,
+                    skipTwinSync: true,
+                    exec: tx,
+                });
+            }
+        }
+
+        return { balance: Math.max(balance, 0), closed };
+    }, params.exec);
 }
 
 export type RepayDebtResult = {
@@ -703,67 +735,83 @@ export async function repayDebt(params: {
     createdBy: number;
     ownerId: number;
     note?: string | null;
+    exec?: DbExecutor;
 }): Promise<RepayDebtResult> {
-    const debt = await getDebtById(params.debtId);
-    if (!debt) throw new Error("repayDebt: debt missing");
+    return runInTransaction(async (tx) => {
+        const debt = await getDebtById(params.debtId, tx);
+        if (!debt) throw new Error("repayDebt: debt missing");
 
-    const bal = debt.balance > 0 ? debt.balance : 0;
-    const repayAmount = Math.min(params.amount, bal);
-    const remainder = params.amount - repayAmount;
+        const bal = debt.balance > 0 ? debt.balance : 0;
+        const repayAmount = Math.min(params.amount, bal);
+        const remainder = params.amount - repayAmount;
 
-    let balance = bal;
-    let closed = bal <= 0;
+        let balance = bal;
+        let closed = bal <= 0;
 
-    if (repayAmount > 0) {
-        const result = await addDebtItem({
-            debtId: params.debtId,
-            type: "repay",
-            amount: repayAmount,
+        if (repayAmount > 0) {
+            const result = await addDebtItem({
+                debtId: params.debtId,
+                type: "repay",
+                amount: repayAmount,
+                createdBy: params.createdBy,
+                note: params.note,
+                exec: tx,
+            });
+            balance = result.balance;
+            closed = result.closed;
+        }
+
+        if (remainder <= 0) {
+            return { repayAmount, balance, closed, debtId: params.debtId };
+        }
+
+        const remainderCreate = await createDebt({
+            ownerId: params.ownerId,
+            contactName: debt.contact_name,
+            contactId: debt.contact_id,
+            direction: flipDirection(debt.direction),
+            amount: remainder,
+            dueDate: null,
             createdBy: params.createdBy,
             note: params.note,
+            exec: tx,
         });
-        balance = result.balance;
-        closed = result.closed;
-    }
 
-    if (remainder <= 0) {
-        return { repayAmount, balance, closed, debtId: params.debtId };
-    }
-
-    const remainderCreate = await createDebt({
-        ownerId: params.ownerId,
-        contactName: debt.contact_name,
-        contactId: debt.contact_id,
-        direction: flipDirection(debt.direction),
-        amount: remainder,
-        dueDate: null,
-        createdBy: params.createdBy,
-        note: params.note,
-    });
-
-    return {
-        repayAmount,
-        balance,
-        closed,
-        debtId: params.debtId,
-        remainderAmount: remainder,
-        remainderDebt: remainderCreate.remainderDebt ?? remainderCreate.debt,
-        remainderCreate,
-    };
+        return {
+            repayAmount,
+            balance,
+            closed,
+            debtId: params.debtId,
+            remainderAmount: remainder,
+            remainderDebt: remainderCreate.remainderDebt ?? remainderCreate.debt,
+            remainderCreate,
+        };
+    }, params.exec);
 }
 
-export async function setDueDate(debtId: number, dueDate: string | null, skipTwinSync = false) {
-    await db.update(debts).set({ due_date: dueDate }).where(eq(debts.id, debtId));
-    if (!skipTwinSync) {
-        const [row] = await db.select({ linked_debt_id: debts.linked_debt_id }).from(debts).where(eq(debts.id, debtId)).limit(1);
-        if (row?.linked_debt_id) {
-            await setDueDate(row.linked_debt_id, dueDate, true);
+export async function setDueDate(
+    debtId: number,
+    dueDate: string | null,
+    skipTwinSync = false,
+    exec?: DbExecutor,
+) {
+    return runInTransaction(async (tx) => {
+        await tx.update(debts).set({ due_date: dueDate }).where(eq(debts.id, debtId));
+        if (!skipTwinSync) {
+            const [row] = await tx
+                .select({ linked_debt_id: debts.linked_debt_id })
+                .from(debts)
+                .where(eq(debts.id, debtId))
+                .limit(1);
+            if (row?.linked_debt_id) {
+                await setDueDate(row.linked_debt_id, dueDate, true, tx);
+            }
         }
-    }
+    }, exec);
 }
 
-export async function getDebtById(debtId: number): Promise<DebtWithMeta | null> {
-    const [row] = await db
+export async function getDebtById(debtId: number, exec: DbExecutor = db): Promise<DebtWithMeta | null> {
+    const [row] = await exec
         .select(debtSelect)
         .from(debts)
         .innerJoin(contacts, eq(contacts.id, debts.contact_id))
@@ -771,7 +819,7 @@ export async function getDebtById(debtId: number): Promise<DebtWithMeta | null> 
         .limit(1);
 
     if (!row) return null;
-    return (await enrichDebtRows([row]))[0] ?? null;
+    return (await enrichDebtRows([row], exec))[0] ?? null;
 }
 
 export async function getDebtItems(debtId: number): Promise<DebtItemRow[]> {
@@ -819,65 +867,76 @@ export async function createShareInvite(params: {
     granterId: number;
     debtId: number;
 }): Promise<{ ok: true; token: string; id: number } | { ok: false; error: "already_linked" | "not_found" }> {
-    const debt = await getDebtById(params.debtId);
-    if (!debt || debt.owner_id !== params.granterId) {
-        return { ok: false, error: "not_found" };
-    }
-    if (debt.linked_debt_id) {
-        return { ok: false, error: "already_linked" };
-    }
+    return runInTransaction(async (tx) => {
+        const debt = await getDebtById(params.debtId, tx);
+        if (!debt || debt.owner_id !== params.granterId) {
+            return { ok: false, error: "not_found" };
+        }
+        if (debt.linked_debt_id) {
+            return { ok: false, error: "already_linked" };
+        }
 
-    // Yangi havola — shu qarzdagi eski pending takliflar bekor (eski link ishlamaydi)
-    await db
-        .update(shares)
-        .set({ status: "revoked", invite_token: null })
-        .where(
-            and(
-                eq(shares.debt_id, params.debtId),
-                eq(shares.scope, "debt"),
-                eq(shares.status, "pending"),
-            ),
-        );
+        // Yangi havola — shu qarzdagi eski pending takliflar bekor (eski link ishlamaydi)
+        await tx
+            .update(shares)
+            .set({ status: "revoked", invite_token: null })
+            .where(
+                and(
+                    eq(shares.debt_id, params.debtId),
+                    eq(shares.scope, "debt"),
+                    eq(shares.status, "pending"),
+                ),
+            );
 
-    const token = crypto.randomUUID().replaceAll("-", "");
+        const token = crypto.randomUUID().replaceAll("-", "");
 
-    const [row] = await db
-        .insert(shares)
-        .values({
-            granter_id: params.granterId,
-            scope: "debt",
-            access: "write",
-            contact_id: null,
-            debt_id: params.debtId,
-            invite_token: token,
-            status: "pending",
-        })
-        .returning();
+        const [row] = await tx
+            .insert(shares)
+            .values({
+                granter_id: params.granterId,
+                scope: "debt",
+                access: "write",
+                contact_id: null,
+                debt_id: params.debtId,
+                invite_token: token,
+                status: "pending",
+            })
+            .returning();
 
-    return { ok: true, token, id: row.id };
+        return { ok: true, token, id: row.id };
+    });
 }
 
 export async function acceptShareInvite(token: string, granteeId: number) {
-    const [share] = await db.select().from(shares).where(eq(shares.invite_token, token)).limit(1);
-    if (!share || share.status === "revoked") return null;
-    if (share.granter_id === granteeId) return null;
-    // Faqat qarz ulashish (account scope=all endi qabul qilinmaydi)
-    if (share.scope !== "debt" || !share.debt_id) return null;
+    return runInTransaction(async (tx) => {
+        const [share] = await tx
+            .select()
+            .from(shares)
+            .where(eq(shares.invite_token, token))
+            .for("update")
+            .limit(1);
+        if (!share || share.status === "revoked") return null;
+        if (share.granter_id === granteeId) return null;
+        // Faqat qarz ulashish (account scope=all endi qabul qilinmaydi)
+        if (share.scope !== "debt" || !share.debt_id) return null;
 
-    const { ensureTwinDebt } = await import("./debt-link");
-    await ensureTwinDebt(share.debt_id, granteeId);
+        const { ensureTwinDebt } = await import("./debt-link");
+        const twin = await ensureTwinDebt(share.debt_id, granteeId, tx);
+        // Twin yaratilmasa — share ham active bo'lmasin (atomik)
+        if (!twin) return null;
 
-    const [updated] = await db
-        .update(shares)
-        .set({
-            grantee_id: granteeId,
-            status: "active",
-            invite_token: null,
-        })
-        .where(eq(shares.id, share.id))
-        .returning();
+        const [updated] = await tx
+            .update(shares)
+            .set({
+                grantee_id: granteeId,
+                status: "active",
+                invite_token: null,
+            })
+            .where(eq(shares.id, share.id))
+            .returning();
 
-    return updated;
+        return updated;
+    });
 }
 
 /** Due date bo'yicha ochiq qarzlar (scheduler) */
