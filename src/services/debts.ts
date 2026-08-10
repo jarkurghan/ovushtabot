@@ -130,6 +130,7 @@ export async function getOrCreateContact(
 ) {
     const stored = normalizeContactName(name);
 
+    // Avval Telegram user bog'lanishi bo'yicha — ism farq qilsa ham shu kontakt
     if (linkedUserId) {
         const [byLink] = await exec
             .select()
@@ -146,15 +147,20 @@ export async function getOrCreateContact(
         .limit(1);
 
     if (existing) {
-        if (linkedUserId && !existing.linked_user_id) {
-            const [updated] = await exec
-                .update(contacts)
-                .set({ linked_user_id: linkedUserId })
-                .where(eq(contacts.id, existing.id))
-                .returning();
-            return updated;
-        }
-        return existing;
+        // Oddiy qarz qo'shish: bir xil ism = shu kontakt
+        if (!linkedUserId) return existing;
+
+        // Twin/ulashish: ism band (boshqa odam) — hijack qilmasdan "2", "3", ... qo'shib yangi kontakt
+        const uniqueName = await allocateUniqueContactName(ownerId, stored, exec);
+        const [created] = await exec
+            .insert(contacts)
+            .values({
+                owner_id: ownerId,
+                name: uniqueName,
+                linked_user_id: linkedUserId,
+            })
+            .returning();
+        return created;
     }
 
     const [created] = await exec
@@ -166,6 +172,26 @@ export async function getOrCreateContact(
         })
         .returning();
     return created;
+}
+
+/** Band ism uchun oxiriga 2, 3, ... qo'shib bo'sh nom topadi (masalan: ali → ali2 → ali3) */
+async function allocateUniqueContactName(
+    ownerId: number,
+    baseName: string,
+    exec: DbExecutor,
+): Promise<string> {
+    const base = baseName.slice(0, 78); // "…99" uchun joy
+    for (let n = 2; n < 1000; n++) {
+        const candidate = `${base}${n}`.slice(0, 80);
+        const [row] = await exec
+            .select({ id: contacts.id })
+            .from(contacts)
+            .where(and(eq(contacts.owner_id, ownerId), eq(contacts.name, candidate)))
+            .limit(1);
+        if (!row) return candidate;
+    }
+    // Juda kam ehtimol — timestamp bilan
+    return `${base}${Date.now()}`.slice(0, 80);
 }
 
 export async function listContacts(ownerId: number) {
