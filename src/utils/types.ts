@@ -74,5 +74,7 @@ export type SessionData = {
     needsDueDate?: boolean;
     /** Tanishlar bo'limidan ochilgan qarz — ortga qaytish uchun */
     browseContactId?: number;
+    /** Qarzlarim / tanishlar: ochiq yoki arxiv — Ortga qayerga */
+    browseDebtStatus?: "open" | "closed";
     updatedAt: number;
 };

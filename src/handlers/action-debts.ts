@@ -486,6 +486,7 @@ export async function showContactDebts(
         setSession(ctx.from!.id, {
             step: "idle",
             browseContactId: contactId,
+            browseDebtStatus: status,
             contactId,
             contactName: contact.name,
         });
@@ -591,6 +592,7 @@ export async function showDebtList(ctx: CTX, status: "open" | "closed" = "open",
         setSession(ctx.from!.id, {
             step: "idle",
             browseContactId: undefined,
+            browseDebtStatus: status,
         });
 
         const prefix = status === "open" ? ("debt" as const) : ("cdebt" as const);
@@ -637,6 +639,7 @@ export async function showDebtSummary(ctx: CTX, page = 0) {
         const [user] = await saveUser(ctx);
         if (!user) return;
         const lang = user.language;
+        clearSession(ctx.from!.id);
 
         const open = await listOwnedDebts(user.id, "open");
         const borrowed = open.filter((d) => d.direction === "borrowed");
@@ -694,10 +697,15 @@ export async function showDebtDetail(ctx: CTX, debtId: number) {
         if (!debt) return;
 
         const session = getSession(ctx.from!.id);
-        const backCallback =
-            session.browseContactId && session.browseContactId === debt.contact_id
-                ? `pdebts_${debt.contact_id}`
-                : "list_open";
+        let backCallback = "list_open";
+        if (session.browseContactId && session.browseContactId === debt.contact_id) {
+            backCallback =
+                session.browseDebtStatus === "closed"
+                    ? `pclosed_${debt.contact_id}`
+                    : `pdebts_${debt.contact_id}`;
+        } else if (session.browseDebtStatus === "closed") {
+            backCallback = "list_closed";
+        }
 
         const items = await getDebtItems(debtId);
         const preview = formatItemsPreview(user.language, items);

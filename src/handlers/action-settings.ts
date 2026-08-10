@@ -16,6 +16,7 @@ export async function showSettings(ctx: CTX) {
     try {
         const [user] = await saveUser(ctx);
         if (!user) return;
+        if (ctx.from) clearSession(ctx.from.id);
 
         const text = [
             t(user.language, "settings_title"),
