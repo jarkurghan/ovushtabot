@@ -23,6 +23,8 @@ export type SaveUserData = {
     notify_enabled?: boolean;
     status?: Status;
     utm?: string;
+    /** Share havola orqali kelganda — ulashgan tomon */
+    referredBy?: Pick<User, "tg_id" | "first_name" | "last_name" | "username">;
 };
 
 export type CTX = CommandContext<Context> | CallbackQueryContext<Context> | Context;

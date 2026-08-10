@@ -1,11 +1,12 @@
 import type { CommandContext, Context } from "grammy";
 import { t } from "../i18n";
 import { findUtm, getStartPayload, objPayload } from "../services/start-payload";
-import { saveUser } from "../services/save-user";
-import { acceptShareInvite } from "../services/debts";
+import { getUserById, saveUser } from "../services/save-user";
+import { acceptShareInvite, getShareByInviteToken } from "../services/debts";
 import { mainReplyKeyboard } from "../services/keyboards";
 import { clearSession } from "../services/session";
 import { sendErrorLog } from "../services/log";
+import type { SaveUserData } from "../utils/types";
 
 export async function registerStartCommand(ctx: CommandContext<Context>) {
     try {
@@ -16,9 +17,26 @@ export async function registerStartCommand(ctx: CommandContext<Context>) {
 
         const payload = getStartPayload(ctx);
         const payloadObj = objPayload(payload);
-        const utm = findUtm(payloadObj);
 
-        const [user] = await saveUser(ctx, { utm, status: "active" });
+        const saveData: SaveUserData = { status: "active", utm: findUtm(payloadObj) };
+
+        if (payloadObj.share) {
+            saveData.utm = "Ikkinchi tomon orqali";
+            const share = await getShareByInviteToken(payloadObj.share);
+            if (share?.granter_id) {
+                const granter = await getUserById(share.granter_id);
+                if (granter) {
+                    saveData.referredBy = {
+                        tg_id: granter.tg_id,
+                        first_name: granter.first_name,
+                        last_name: granter.last_name,
+                        username: granter.username,
+                    };
+                }
+            }
+        }
+
+        const [user] = await saveUser(ctx, saveData);
         if (!user) return;
 
         clearSession(ctx.from!.id);

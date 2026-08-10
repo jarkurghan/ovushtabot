@@ -915,6 +915,12 @@ export async function createShareInvite(params: {
     });
 }
 
+/** Pending/valid token bo'yicha share (start payload uchun) */
+export async function getShareByInviteToken(token: string) {
+    const [share] = await db.select().from(shares).where(eq(shares.invite_token, token)).limit(1);
+    return share ?? null;
+}
+
 export async function acceptShareInvite(token: string, granteeId: number) {
     return runInTransaction(async (tx) => {
         const [share] = await tx

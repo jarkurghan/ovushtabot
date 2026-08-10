@@ -25,9 +25,7 @@ export function mapDbUser(row: UserSelect): User {
 
 export function userLink(user: { tg_id: string | number; first_name?: string | null; last_name?: string | null; username?: string | null }): string {
     const fullName = `${user.first_name || "Noma'lum"} ${user.last_name || ""}`.trim();
-    return user.username
-        ? `<a href="tg://resolve?domain=${user.username}">${fullName}</a>`
-        : `<a href="tg://user?id=${user.tg_id}">${fullName}</a>`;
+    return user.username ? `<a href="tg://resolve?domain=${user.username}">${fullName}</a>` : `<a href="tg://user?id=${user.tg_id}">${fullName}</a>`;
 }
 
 export function groupLink(chat: { id: number; title?: string; username?: string | null }): string {
@@ -36,7 +34,11 @@ export function groupLink(chat: { id: number; title?: string; username?: string 
 }
 
 export async function getUserByTgId(tgId: string | number): Promise<User | null> {
-    const [row] = await db.select().from(users).where(eq(users.tg_id, String(tgId))).limit(1);
+    const [row] = await db
+        .select()
+        .from(users)
+        .where(eq(users.tg_id, String(tgId)))
+        .limit(1);
     return row ? mapDbUser(row) : null;
 }
 
@@ -62,14 +64,18 @@ export async function saveUser(ctx: CTX, data?: SaveUserData): Promise<User[]> {
     if (data?.status) patch.status = data.status;
 
     try {
-        const [existing] = await db.select().from(users).where(eq(users.tg_id, String(from.id))).limit(1);
+        const [existing] = await db
+            .select()
+            .from(users)
+            .where(eq(users.tg_id, String(from.id)))
+            .limit(1);
 
         if (!existing) {
             patch.status = data?.status || "active";
             patch.language = data?.language || "uz";
 
             if (ADMIN_CHAT) {
-                const utm = data?.utm || "organic";
+                const utm = data?.utm || "Xudo biladi 🤷‍♂️";
                 const username = from.username ? `@${from.username}` : "Noma'lum";
                 const link = userLink({
                     tg_id: from.id,
@@ -77,13 +83,19 @@ export async function saveUser(ctx: CTX, data?: SaveUserData): Promise<User[]> {
                     last_name: from.last_name,
                     username: from.username,
                 });
-                const msg =
-                    `🆕 Yangi foydalanuvchi:\n\n👤 Ism: ${link}\n🔗 Username: ${username}\n` +
-                    `🆔 ID: <code>${from.id}</code>\n🚪 Qayerdan: ${utm}\n🤖 Bot: debt`;
+                let msg = `🆕 Yangi foydalanuvchi:\n\n👤 Ism: ${link}\n🔗 Username: ${username}\n🆔 ID: <code>${from.id}</code>\n🚪 Qayerdan kelgan: ${utm}`;
+                if (data?.referredBy) {
+                    const ref = data.referredBy;
+                    msg += `\n👤 Ikkinchi tomon: ${userLink(ref)}` + `\n🆔 Ikkinchi tomon ID: <code>${ref.tg_id}</code>`;
+                }
+                msg += `\n🤖 Bot: @${bot.botInfo.username}`;
                 await bot.api.sendMessage(ADMIN_CHAT, msg, { parse_mode: "HTML" }).catch(() => undefined);
             }
 
-            const inserted = await db.insert(users).values(patch as UserInsert).returning();
+            const inserted = await db
+                .insert(users)
+                .values(patch as UserInsert)
+                .returning();
             return inserted.map(mapDbUser);
         }
 
@@ -97,12 +109,15 @@ export async function saveUser(ctx: CTX, data?: SaveUserData): Promise<User[]> {
         if (typeof data?.notify_enabled === "boolean") updateData.notify_enabled = data.notify_enabled;
         if (data?.status) updateData.status = data.status;
 
-        
         if (existing.status === "has_blocked" && !data?.status) {
             updateData.status = "active";
         }
 
-        const updated = await db.update(users).set(updateData).where(eq(users.tg_id, String(from.id))).returning();
+        const updated = await db
+            .update(users)
+            .set(updateData)
+            .where(eq(users.tg_id, String(from.id)))
+            .returning();
         return updated.map(mapDbUser);
     } catch (error) {
         await sendErrorLog({ event: "User saqlashda", error, ctx });
