@@ -770,6 +770,18 @@ export async function createShareInvite(params: {
         return { ok: false, error: "already_linked" };
     }
 
+    // Yangi havola — shu qarzdagi eski pending takliflar bekor (eski link ishlamaydi)
+    await db
+        .update(shares)
+        .set({ status: "revoked", invite_token: null })
+        .where(
+            and(
+                eq(shares.debt_id, params.debtId),
+                eq(shares.scope, "debt"),
+                eq(shares.status, "pending"),
+            ),
+        );
+
     const token = crypto.randomUUID().replaceAll("-", "");
 
     const [row] = await db
