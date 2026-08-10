@@ -84,6 +84,12 @@ function isoFromParts(y: number, m: number, d: number): string {
     return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+/** Timestamp → Toshkent kalendar sanasi (YYYY-MM-DD) */
+export function dateIsoInTashkent(date: Date): string {
+    const { y, m, d } = partsInTashkent(date);
+    return isoFromParts(y, m, d);
+}
+
 /** Bugungi Tashkent sanasidan +n kun */
 export function addDaysInTashkent(days: number): string {
     const { y, m, d } = partsInTashkent(new Date());

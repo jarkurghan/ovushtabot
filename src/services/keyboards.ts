@@ -2,7 +2,7 @@ import { InlineKeyboard, Keyboard } from "grammy";
 import { t } from "../i18n";
 import type { Lang } from "../utils/types";
 import type { ContactSummary, DebtWithMeta } from "./debts";
-import { escapeHtml, formatAmount, formatContactName, formatDate } from "../utils/format";
+import { escapeHtml, formatAmount, formatContactName, formatDate, dateIsoInTashkent } from "../utils/format";
 import { pageCallback } from "../utils/paginate";
 
 export function mainReplyKeyboard(lang: Lang) {
@@ -258,7 +258,7 @@ export function formatItemsPreview(
         .slice(0, 8)
         .map((i) => {
             const sign = i.type === "charge" ? "+" : "−";
-            const d = formatDate(i.created_at.toISOString().slice(0, 10), lang);
+            const d = formatDate(dateIsoInTashkent(i.created_at), lang);
             const note = i.note?.trim() ? ` — ${escapeHtml(i.note.trim())}` : "";
             return `${sign}${formatAmount(i.amount, lang)} (${d})${note}`;
         })
