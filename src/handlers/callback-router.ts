@@ -3,7 +3,6 @@ import { sendErrorLog } from "../services/log";
 import {
     handleTextMessage,
     onChargeStart,
-    onCloseDebt,
     onContactPick,
     onDirection,
     onToggleHideWhenZero,
@@ -192,11 +191,6 @@ export async function registerCallbackRouter(ctx: CTX) {
 
         if (data.startsWith("due_")) {
             await onDueStart(ctx, Number(data.slice(4)));
-            return;
-        }
-
-        if (data.startsWith("close_")) {
-            await onCloseDebt(ctx, Number(data.slice(6)));
             return;
         }
 

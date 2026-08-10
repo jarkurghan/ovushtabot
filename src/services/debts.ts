@@ -695,16 +695,6 @@ export async function setDueDate(debtId: number, dueDate: string | null, skipTwi
     }
 }
 
-export async function closeDebt(debtId: number, skipTwinSync = false) {
-    await db.update(debts).set({ status: "closed" }).where(eq(debts.id, debtId));
-    if (!skipTwinSync) {
-        const [row] = await db.select({ linked_debt_id: debts.linked_debt_id }).from(debts).where(eq(debts.id, debtId)).limit(1);
-        if (row?.linked_debt_id) {
-            await closeDebt(row.linked_debt_id, true);
-        }
-    }
-}
-
 export async function getDebtById(debtId: number): Promise<DebtWithMeta | null> {
     const [row] = await db
         .select(debtSelect)

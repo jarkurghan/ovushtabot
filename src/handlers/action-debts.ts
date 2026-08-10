@@ -20,7 +20,6 @@ import {
 } from "../services/keyboards";
 import {
     addDebtItem,
-    closeDebt,
     createDebt,
     createShareInvite,
     findOpenDebtId,
@@ -69,7 +68,6 @@ async function editOrReply(ctx: CTX, text: string, replyMarkup: InlineKeyboard) 
     await ctx.reply(text, { parse_mode: "HTML", reply_markup: replyMarkup });
 }
 import {
-    notifyDebtClosed,
     notifyDebtCreated,
     notifyDebtDueChanged,
     notifyDebtItemAdded,
@@ -767,24 +765,6 @@ export async function onDueStart(ctx: CTX, debtId: number) {
         await ctx.reply(t(user.language, "ask_due_date"), { reply_markup: dueDateKeyboard(user.language) });
     } catch (error) {
         await sendErrorLog({ event: "onDueStart", error, ctx });
-    }
-}
-
-export async function onCloseDebt(ctx: CTX, debtId: number) {
-    try {
-        const [user] = await saveUser(ctx);
-        if (!user) return;
-        const access = await resolveDebtAccess(user, debtId);
-        if (!access.canWrite) {
-            await ctx.answerCallbackQuery({ text: t(user.language, "write_denied") }).catch(() => undefined);
-            return;
-        }
-        await closeDebt(debtId);
-        await notifyDebtClosed({ debtId, actor: user });
-        await ctx.answerCallbackQuery({ text: t(user.language, "debt_closed") }).catch(() => undefined);
-        await showDebtList(ctx, "open");
-    } catch (error) {
-        await sendErrorLog({ event: "onCloseDebt", error, ctx });
     }
 }
 
