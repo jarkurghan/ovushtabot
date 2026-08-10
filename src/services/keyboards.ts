@@ -67,7 +67,6 @@ export function directionKeyboard(lang: Lang) {
         .text(t(lang, "btn_cancel"), "cancel");
 }
 
-/** Sahifa navigatsiyasi: ‹ | 2/5 | › */
 export function appendPageNav(
     kb: InlineKeyboard,
     lang: Lang,
@@ -154,7 +153,7 @@ export function contactDebtsKeyboard(
     page: number,
     totalPages: number,
     hideWhenZero = false,
-    /** Faqat aktiv qarz yo'qida «ovushmayman» tugmasi */
+    
     showHideWhenZero = false,
 ) {
     const kb = new InlineKeyboard();

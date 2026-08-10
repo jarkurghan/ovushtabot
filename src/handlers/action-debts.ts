@@ -75,7 +75,6 @@ import {
 } from "../services/party-notify";
 import { bot } from "../bot";
 
-/** Tezkor sana tugmasi → ISO sana; null = tugma emas */
 function resolveDuePreset(text: string, lang: Lang): string | null {
     const match = (...keys: string[]) => keys.some((k) => text === t(lang, k) || text === t("uz", k) || text === t("cyrl", k));
 
@@ -142,7 +141,7 @@ function titleAfterDebtCreate(lang: Lang, result: CreateDebtResult): string {
 
 async function replyAfterDebtCreate(ctx: CTX, lang: Lang, result: CreateDebtResult) {
     const title = titleAfterDebtCreate(lang, result);
-    // Faqat yopilgan qaytarish — 0 balansli kartani ko'rsatmaslik
+    
     if (result.mergeType === "repay" && result.closed && !result.remainderDebt) {
         await ctx.reply(title, { reply_markup: mainReplyKeyboard(lang) });
         return;
@@ -633,7 +632,6 @@ function buildSummaryLines(lang: Lang, list: DebtWithMeta[]): string[] {
     });
 }
 
-/** Ochiq qarzlar matnli hisoboti — sahifalangan */
 export async function showDebtSummary(ctx: CTX, page = 0) {
     try {
         const [user] = await saveUser(ctx);
@@ -879,7 +877,7 @@ export async function handleTextMessage(ctx: CTX) {
         if (!user) return;
         const lang = user.language;
 
-        // Reply keyboard buttons
+        
         if (text === t(lang, "btn_add") || text === t("uz", "btn_add") || text === t("cyrl", "btn_add")) {
             await startAddDebt(ctx);
             return;
@@ -1016,7 +1014,7 @@ export async function handleTextMessage(ctx: CTX) {
             }
 
             const oppositeDir = session.direction === "borrowed" ? "lent" : "borrowed";
-            // Bir xil yoki teskari ochiq qarz bor — sana so'ralmasin (charge yoki repay)
+            
             const openId =
                 (await findOpenDebtId(user.id, session.contactName, session.direction, session.contactId)) ??
                 (await findOpenDebtId(user.id, session.contactName, oppositeDir, session.contactId));
@@ -1088,7 +1086,7 @@ export async function handleTextMessage(ctx: CTX) {
                 return;
             }
 
-            // «Hammasi» — izoh so'ralmasin, avtomatik yoziladi
+            
             if (isAll) {
                 setSession(ctx.from.id, {
                     step: "item_note",

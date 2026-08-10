@@ -10,7 +10,7 @@ export function objPayload(payload: string): Record<string, string> {
     const result: Record<string, string> = {};
     if (!payload) return result;
 
-    // share_TOKEN yoki utm_xxx=yyy&...
+    
     if (payload.startsWith("share_")) {
         result.share = payload.slice("share_".length);
         return result;

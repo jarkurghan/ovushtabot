@@ -1,4 +1,4 @@
-/** 500000 | 500.000 | 500,000 | 500 ming | 500минг */
+
 export function parseAmount(input: string): number | null {
     let raw = input.trim().toLowerCase();
     if (!raw) return null;
@@ -35,7 +35,6 @@ export function formatAmount(amount: number, lang: "uz" | "cyrl" = "uz"): string
     return lang === "cyrl" ? `${formatted} сўм` : `${formatted} so'm`;
 }
 
-/** Faqat DD.MM.YYYY yoki DD/MM/YYYY → ISO YYYY-MM-DD */
 export function parseDate(input: string): string | null {
     const raw = input.trim();
     const dmy = raw.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
@@ -84,13 +83,11 @@ function isoFromParts(y: number, m: number, d: number): string {
     return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-/** Timestamp → Toshkent kalendar sanasi (YYYY-MM-DD) */
 export function dateIsoInTashkent(date: Date): string {
     const { y, m, d } = partsInTashkent(date);
     return isoFromParts(y, m, d);
 }
 
-/** Bugungi Tashkent sanasidan +n kun */
 export function addDaysInTashkent(days: number): string {
     const { y, m, d } = partsInTashkent(new Date());
     const base = new Date(Date.UTC(y, m - 1, d));
@@ -98,7 +95,6 @@ export function addDaysInTashkent(days: number): string {
     return isoFromParts(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate());
 }
 
-/** Bugungi Tashkent sanasidan +n oy (shu kun; oy oxirida clamp) */
 export function addMonthsInTashkent(months: number): string {
     const { y, m, d } = partsInTashkent(new Date());
     const target = new Date(Date.UTC(y, m - 1 + months, 1));
@@ -107,10 +103,9 @@ export function addMonthsInTashkent(months: number): string {
     return isoFromParts(target.getUTCFullYear(), target.getUTCMonth() + 1, day);
 }
 
-/** Keyingi oyning 1-sanasi (Tashkent) */
 export function firstOfNextMonthInTashkent(): string {
     const { y, m } = partsInTashkent(new Date());
-    const next = new Date(Date.UTC(y, m, 1)); // m is 1-based; Date.UTC month is 0-based → m means next month
+    const next = new Date(Date.UTC(y, m, 1));
     return isoFromParts(next.getUTCFullYear(), next.getUTCMonth() + 1, 1);
 }
 
@@ -127,17 +122,14 @@ export function escapeHtml(text: string): string {
     return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-/** DB ga yozish: trim + lowercase (case-insensitive unique) */
 export function normalizeContactName(input: string): string {
     return input.trim().replace(/\s+/g, " ").toLocaleLowerCase("uz");
 }
 
-/** User kiritgan ismda HTML-xavfli belgilar bormi */
 export function contactNameHasForbiddenChars(input: string): boolean {
     return /[<>&]/.test(input);
 }
 
-/** UI: har so'zning 1-harfi katta */
 export function formatContactName(name: string): string {
     const normalized = name.trim().replace(/\s+/g, " ");
     if (!normalized) return normalized;

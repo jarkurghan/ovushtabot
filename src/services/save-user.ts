@@ -97,7 +97,7 @@ export async function saveUser(ctx: CTX, data?: SaveUserData): Promise<User[]> {
         if (typeof data?.notify_enabled === "boolean") updateData.notify_enabled = data.notify_enabled;
         if (data?.status) updateData.status = data.status;
 
-        // Blokdan qaytganda active qilish
+        
         if (existing.status === "has_blocked" && !data?.status) {
             updateData.status = "active";
         }

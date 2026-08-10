@@ -8,17 +8,13 @@ function flipDirection(direction: Direction): Direction {
     return direction === "borrowed" ? "lent" : "borrowed";
 }
 
-/**
- * Qarz ulashish qabul qilinganda: grantee uchun juft (twin) debt yaratadi.
- * Yo'nalish teskari, contact = granter ismi, itemlar nusxalanadi.
- */
 export async function ensureTwinDebt(
     sourceDebtId: number,
     granteeId: number,
     exec?: DbExecutor,
 ): Promise<DebtWithMeta | null> {
     return runInTransaction(async (tx) => {
-        // Parallel accept race uchun qatorni qulflash
+        
         const [locked] = await tx
             .select({
                 id: debts.id,
@@ -81,19 +77,19 @@ export async function ensureTwinDebt(
         await tx.update(debts).set({ linked_debt_id: twin.id }).where(eq(debts.id, sourceDebtId));
         await tx.update(debts).set({ linked_debt_id: sourceDebtId }).where(eq(debts.id, twin.id));
 
-        // Kontaktni telegram user bilan bog'lash
+        
         await tx
             .update(contacts)
             .set({ linked_user_id: source.owner_id })
             .where(eq(contacts.id, contact.id));
 
-        // Ikkala tomonda kontakt ↔ telegram user bog'lanishi saqlansin (keyingi qarzlar auto-twin)
+        
         await tx
             .update(contacts)
             .set({ linked_user_id: granteeId })
             .where(eq(contacts.id, source.contact_id));
 
-        // Yangi twin = aktiv qarz → «ovushmayman» o'chadi (ikkala tomon)
+        
         await clearHideWhenZeroForContact(contact.id, tx);
         await clearHideWhenZeroForContact(source.contact_id, tx);
 

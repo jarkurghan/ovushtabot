@@ -20,12 +20,12 @@ export function paginate<T>(items: T[], page: number, size = PAGE_SIZE): PageRes
     };
 }
 
-/** Callback: `prefix` yoki `prefix_p{N}` */
+
 export function pageCallback(prefix: string, page: number): string {
     return page <= 0 ? prefix : `${prefix}_p${page}`;
 }
 
-/** `list_open_p2` → { base: "list_open", page: 2 }; `pdebts_5_p1` → { base: "pdebts_5", page: 1 } */
+
 export function parsePageCallback(data: string): { base: string; page: number } | null {
     const m = data.match(/^(.*)_p(\d+)$/);
     if (!m) return null;

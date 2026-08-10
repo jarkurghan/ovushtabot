@@ -14,7 +14,7 @@ async function debtParties(debt: DebtWithMeta, excludeUserId: number): Promise<U
 
     if (debt.owner_id !== excludeUserId) ids.add(debt.owner_id);
 
-    // Twin egasi — ikkinchi tomon
+    
     if (debt.linked_debt_id) {
         const twin = await getDebtById(debt.linked_debt_id);
         if (twin && twin.owner_id !== excludeUserId) ids.add(twin.owner_id);
@@ -35,7 +35,7 @@ async function sendToParties(debtId: number, actorId: number, buildText: (user: 
     const parties = await debtParties(debt, actorId);
     for (const user of parties) {
         try {
-            // Twin egasiga o'z nuqtai nazaridagi matn
+            
             let viewDebt = debt;
             if (debt.linked_debt_id) {
                 const twin = await getDebtById(debt.linked_debt_id);

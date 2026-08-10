@@ -5,4 +5,3 @@ export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
 export const PORT = Number(process.env.PORT) || 4040;
 export const ADMIN_CHAT = process.env.ADMIN_CHAT_ID || "";
 export const LOG_CHAT = process.env.LOG_CHAT_ID || "";
-export const TIMEZONE = "Asia/Tashkent";

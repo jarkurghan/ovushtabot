@@ -15,7 +15,7 @@ export type DebtWithMeta = {
     note: string | null;
     linked_debt_id: number | null;
     balance: number;
-    /** Birinchi charge summasi (arxiv ro'yxati uchun) */
+    
     initial_amount: number;
     created_at: Date;
 };
@@ -79,7 +79,6 @@ async function balanceForDebtIds(debtIds: number[], exec: DbExecutor = db): Prom
     return map;
 }
 
-/** Har bir qarzning eng birinchi charge summasi */
 async function firstChargeForDebtIds(debtIds: number[], exec: DbExecutor = db): Promise<Map<number, number>> {
     const map = new Map<number, number>();
     if (!debtIds.length) return map;
@@ -130,7 +129,7 @@ export async function getOrCreateContact(
 ) {
     const stored = normalizeContactName(name);
 
-    // Avval Telegram user bog'lanishi bo'yicha — ism farq qilsa ham shu kontakt
+    
     if (linkedUserId) {
         const [byLink] = await exec
             .select()
@@ -147,10 +146,10 @@ export async function getOrCreateContact(
         .limit(1);
 
     if (existing) {
-        // Oddiy qarz qo'shish: bir xil ism = shu kontakt
+        
         if (!linkedUserId) return existing;
 
-        // Twin/ulashish: ism band (boshqa odam) — hijack qilmasdan "2", "3", ... qo'shib yangi kontakt
+        
         const uniqueName = await allocateUniqueContactName(ownerId, stored, exec);
         const [created] = await exec
             .insert(contacts)
@@ -174,13 +173,12 @@ export async function getOrCreateContact(
     return created;
 }
 
-/** Band ism uchun oxiriga 2, 3, ... qo'shib bo'sh nom topadi (masalan: ali → ali2 → ali3) */
 async function allocateUniqueContactName(
     ownerId: number,
     baseName: string,
     exec: DbExecutor,
 ): Promise<string> {
-    const base = baseName.slice(0, 78); // "…99" uchun joy
+    const base = baseName.slice(0, 78); 
     for (let n = 2; n < 1000; n++) {
         const candidate = `${base}${n}`.slice(0, 80);
         const [row] = await exec
@@ -190,7 +188,7 @@ async function allocateUniqueContactName(
             .limit(1);
         if (!row) return candidate;
     }
-    // Juda kam ehtimol — timestamp bilan
+    
     return `${base}${Date.now()}`.slice(0, 80);
 }
 
@@ -202,7 +200,6 @@ export async function listContacts(ownerId: number) {
         .orderBy(contacts.name);
 }
 
-/** Kontakt bo'yicha ochiq qarzlar jami balansi */
 async function openBalanceByContactIds(ownerId: number, contactIds: number[]): Promise<Map<number, number>> {
     const map = new Map<number, number>();
     if (!contactIds.length) return map;
@@ -225,13 +222,11 @@ async function openBalanceByContactIds(ownerId: number, contactIds: number[]): P
     return map;
 }
 
-/** Shu kontakt bilan aktiv (ochiq, balans > 0) qarz bormi */
 export async function contactHasActiveDebt(ownerId: number, contactId: number): Promise<boolean> {
     const balances = await openBalanceByContactIds(ownerId, [contactId]);
     return (balances.get(contactId) ?? 0) > 0;
 }
 
-/** Yangi/qayta ochilgan qarzda «ovushmayman» avtomatik o'chadi */
 export async function clearHideWhenZeroForContact(
     contactId: number,
     exec: DbExecutor = db,
@@ -242,10 +237,6 @@ export async function clearHideWhenZeroForContact(
         .where(and(eq(contacts.id, contactId), eq(contacts.hide_when_zero, true)));
 }
 
-/**
- * Qarz qo'shishdagi tanlash ro'yxati:
- * hide_when_zero=true va ochiq qarz jami <= 0 bo'lsa chiqarilmaydi.
- */
 export async function listContactsForPicker(ownerId: number) {
     const known = await listContacts(ownerId);
     if (!known.length) return [];
@@ -341,7 +332,6 @@ export type ContactSummary = {
     openCount: number;
 };
 
-/** Tanishlar + tarixdagi jami (barcha charge'lar yig'indisi, ochiq/yopiq) */
 export async function listContactSummaries(ownerId: number): Promise<ContactSummary[]> {
     const known = await listContacts(ownerId);
     if (!known.length) return [];
@@ -400,7 +390,6 @@ export async function listDebtsByContact(
     return enrichDebtRows(rows);
 }
 
-/** Kontakt avval ulashilgan bo'lsa — linked user; yo'q bo'lsa eski twin dan tiklaydi */
 async function resolveContactLinkedUserId(
     contact: typeof contacts.$inferSelect,
     exec: DbExecutor = db,
@@ -425,16 +414,16 @@ async function resolveContactLinkedUserId(
 
 export type CreateDebtResult = {
     debt: DebtWithMeta;
-    /** Mavjud ochiq qarzga qo'shildi (bir xil yo'nalish) yoki qaytarish (teskari) */
+    
     merged: boolean;
-    /** bir xil → charge; teskari → repay (+ qolgan summa yangi yo'nalishda) */
+    
     mergeType?: "charge" | "repay" | "net";
     amount: number;
     closed?: boolean;
-    /** Teskari qarzdan keyin qolgan summa uchun ochilgan qarz */
+    
     remainderDebt?: DebtWithMeta;
     remainderAmount?: number;
-    /** Net paytda qaytarish bo'lgan eski qarz id */
+    
     settledDebtId?: number;
 };
 
@@ -442,10 +431,6 @@ function flipDirection(direction: Direction): Direction {
     return direction === "borrowed" ? "lent" : "borrowed";
 }
 
-/**
- * Shu tanish + SHU yo'nalishdagi ochiq qarz (merge uchun).
- * Teskari yo'nalish (oldim vs berdim) hech qachon birlashtirilmaydi.
- */
 export async function findOpenDebtId(
     ownerId: number,
     contactName: string,
@@ -493,7 +478,7 @@ export async function findOpenDebtId(
         if (sameDir) return sameDir.id;
     }
 
-    // Peer twin orqali — faqat o'z tomonda shu yo'nalishdagi juft
+    
     for (const peerUserId of peerIds) {
         const [oursDirect] = await exec
             .select({ id: debts.id })
@@ -546,7 +531,7 @@ export async function createDebt(params: {
     createdBy: number;
     contactId?: number | null;
     note?: string | null;
-    /** Nested chaqiriq (repayDebt va h.k.) uchun mavjud transaction */
+    
     exec?: DbExecutor;
 }): Promise<CreateDebtResult> {
     return runInTransaction(async (tx) => {
@@ -556,7 +541,7 @@ export async function createDebt(params: {
               (await getOrCreateContact(params.ownerId, params.contactName, null, tx)))
             : await getOrCreateContact(params.ownerId, params.contactName, null, tx);
 
-        // Bir xil yo'nalishdagi ochiq qarz → charge; teskari ochiq qarz → repay (yangisi ochilmaydi)
+        
         const sameDirId = await findOpenDebtId(
             params.ownerId,
             params.contactName,
@@ -629,7 +614,7 @@ export async function createDebt(params: {
         }
 
         if (oppositeDirId) {
-            // Teskari yo'nalish: avval eski qarzdan qaytarish, ortiqcha bo'lsa yangi yo'nalishda qarz
+            
             const existing = await getDebtById(oppositeDirId, tx);
             if (!existing) throw new Error("createDebt opposite: debt missing");
             const bal = existing.balance > 0 ? existing.balance : 0;
@@ -687,7 +672,7 @@ export async function addDebtItem(params: {
     amount: number;
     createdBy: number;
     note?: string | null;
-    /** Twin ga qayta sync qilmaslik (loop oldini olish) */
+    
     skipTwinSync?: boolean;
     exec?: DbExecutor;
 }): Promise<{ balance: number; closed: boolean }> {
@@ -750,11 +735,10 @@ export type RepayDebtResult = {
     debtId: number;
     remainderDebt?: DebtWithMeta;
     remainderAmount?: number;
-    /** createDebt natijasi — notify uchun */
+    
     remainderCreate?: CreateDebtResult;
 };
 
-/** Qaytarish: balansdan ortiq bo'lsa teskari yo'nalishda yangi qarz */
 export async function repayDebt(params: {
     debtId: number;
     amount: number;
@@ -852,7 +836,6 @@ export async function getDebtItems(debtId: number): Promise<DebtItemRow[]> {
     return db.select().from(debtItems).where(eq(debtItems.debt_id, debtId)).orderBy(desc(debtItems.created_at));
 }
 
-/** Ownerning ochiq/yopiq qarzlari */
 export async function listOwnedDebts(
     ownerId: number,
     status: "open" | "closed" = "open",
@@ -877,7 +860,6 @@ export type DebtAccess = {
     isOwner: boolean;
 };
 
-/** Faqat qarz egasi (twin egasi o'z debtiga owner) */
 export async function resolveDebtAccess(user: User, debtId: number): Promise<DebtAccess> {
     const debt = await getDebtById(debtId);
     if (!debt) return { canView: false, canWrite: false, isOwner: false };
@@ -902,7 +884,7 @@ export async function createShareInvite(params: {
             return { ok: false, error: "already_linked" };
         }
 
-        // Yangi havola — shu qarzdagi eski pending takliflar bekor (eski link ishlamaydi)
+        
         await tx
             .update(shares)
             .set({ status: "revoked", invite_token: null })
@@ -943,12 +925,12 @@ export async function acceptShareInvite(token: string, granteeId: number) {
             .limit(1);
         if (!share || share.status === "revoked") return null;
         if (share.granter_id === granteeId) return null;
-        // Faqat qarz ulashish (account scope=all endi qabul qilinmaydi)
+        
         if (share.scope !== "debt" || !share.debt_id) return null;
 
         const { ensureTwinDebt } = await import("./debt-link");
         const twin = await ensureTwinDebt(share.debt_id, granteeId, tx);
-        // Twin yaratilmasa — share ham active bo'lmasin (atomik)
+        
         if (!twin) return null;
 
         const [updated] = await tx
@@ -965,7 +947,6 @@ export async function acceptShareInvite(token: string, granteeId: number) {
     });
 }
 
-/** Due date bo'yicha ochiq qarzlar (scheduler) */
 export async function listDebtsDueOn(dateIso: string): Promise<DebtWithMeta[]> {
     const rows = await db
         .select(debtSelect)

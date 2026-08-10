@@ -18,7 +18,6 @@ import {
     showDebtList,
     showDebtSummary,
     showPeopleList,
-    startAddDebt,
 } from "./action-debts";
 import {
     onSelectLang,
@@ -101,7 +100,7 @@ export async function registerCallbackRouter(ctx: CTX) {
             }
         }
 
-        // pdebts_{id} | pdebts_{id}_p{N}
+        
         if (data.startsWith("pdebts_")) {
             const paged = parsePageCallback(data);
             if (paged?.base.startsWith("pdebts_")) {
@@ -174,11 +173,6 @@ export async function registerCallbackRouter(ctx: CTX) {
             return;
         }
 
-        if (data.startsWith("cdebt_")) {
-            await showDebtDetail(ctx, Number(data.slice(6)));
-            return;
-        }
-
         if (data.startsWith("repay_")) {
             await onRepayStart(ctx, Number(data.slice(6)));
             return;
@@ -196,11 +190,6 @@ export async function registerCallbackRouter(ctx: CTX) {
 
         if (data.startsWith("share_")) {
             await onShareStart(ctx, Number(data.slice(6)));
-            return;
-        }
-
-        if (data === "add_debt") {
-            await startAddDebt(ctx);
             return;
         }
     } catch (error) {

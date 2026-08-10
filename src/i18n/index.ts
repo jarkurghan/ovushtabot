@@ -63,7 +63,6 @@ const uz: Dict = {
     share_already_linked: "Bu qarz allaqachon ikkinchi tomon bilan bog'langan.",
     balance: "Qarz",
     due: "Muddat",
-    no_due: "Belgilanmagan",
     items: "Harakatlar",
     charge: "Qo'shimcha",
     repay: "Qaytarish",
@@ -176,7 +175,6 @@ const cyrl: Dict = {
     share_already_linked: "Бу қарз аллақачон иккинчи томон билан боғланган.",
     balance: "Қарз",
     due: "Муддат",
-    no_due: "Белгиланмаган",
     items: "Ҳаракатлар",
     charge: "Қўшимча",
     repay: "Қайтариш",
@@ -238,8 +236,4 @@ export function t(lang: Lang, key: string, vars?: Record<string, string | number
         }
     }
     return text;
-}
-
-export function langLabel(lang: Lang): string {
-    return lang === "cyrl" ? "Ўзбек (кирилл)" : "O'zbek (lotin)";
 }

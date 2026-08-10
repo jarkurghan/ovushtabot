@@ -36,7 +36,7 @@ export const users = pgTable(
     (table) => [uniqueIndex("users_tg_id_unique").on(table.tg_id)],
 );
 
-/** Qarzning ikkinchi tomoni (ism bilan). */
+
 export const contacts = pgTable(
     "contacts",
     {
@@ -46,7 +46,7 @@ export const contacts = pgTable(
             .references(() => users.id),
         name: text("name").notNull(),
         linked_user_id: integer("linked_user_id").references(() => users.id),
-        /** true: ochiq qarz 0 bo'lsa qarz qo'shishdagi tanlash ro'yxatida ko'rinmaydi */
+        
         hide_when_zero: boolean("hide_when_zero").default(false).notNull(),
         created_at: timestamp("created_at").defaultNow().notNull(),
         updated_at: timestamp("updated_at")
@@ -59,11 +59,7 @@ export const contacts = pgTable(
     ],
 );
 
-/**
- * Alohida qarz.
- * linked_debt_id — ikkinchi tomon qarzining jufti (twin).
- * Ulashilganda grantee uchun alohida debt yozuvi yaratiladi (yo'nalish teskari) va ikkisi bog'lanadi.
- */
+
 export const debts = pgTable(
     "debts",
     {
@@ -74,12 +70,12 @@ export const debts = pgTable(
         contact_id: integer("contact_id")
             .notNull()
             .references(() => contacts.id),
-        /** owner nuqtai nazaridan: borrowed = oldim, lent = berdim */
+        
         direction: text("direction", { enum: ["borrowed", "lent"] }).notNull(),
         due_date: date("due_date"),
         status: text("status", { enum: ["open", "closed"] }).default("open").notNull(),
         note: text("note"),
-        /** Ikkinchi tomondagi juft qarz (qabul qilingan debt-share) */
+        
         linked_debt_id: integer("linked_debt_id").references((): AnyPgColumn => debts.id),
         created_at: timestamp("created_at").defaultNow().notNull(),
         updated_at: timestamp("updated_at")
@@ -95,7 +91,7 @@ export const debts = pgTable(
     ],
 );
 
-/** Qarz harakatlari: boshlang'ich summa, qaytarish, qo'shimcha. */
+
 export const debtItems = pgTable(
     "debt_items",
     {
@@ -103,7 +99,7 @@ export const debtItems = pgTable(
         debt_id: integer("debt_id")
             .notNull()
             .references(() => debts.id),
-        /** charge = qarz oshadi, repay = qarz kamayadi */
+        
         type: text("type", { enum: ["charge", "repay"] }).notNull(),
         amount: bigint("amount", { mode: "number" }).notNull(),
         note: text("note"),
@@ -115,12 +111,7 @@ export const debtItems = pgTable(
     (table) => [index("debt_items_debt_idx").on(table.debt_id)],
 );
 
-/**
- * Qarz ulashish (ikkinchi tomon):
- * - scope=debt → taklif (pending); qabulda twin debt yaratiladi
- * - scope=all / contact — tarixiy; endi yaratilmaydi
- * access: doim "write" (full).
- */
+
 export const shares = pgTable(
     "shares",
     {
@@ -133,7 +124,7 @@ export const shares = pgTable(
         contact_id: integer("contact_id").references(() => contacts.id),
         debt_id: integer("debt_id").references(() => debts.id),
         access: text("access", { enum: ["view", "write"] }).notNull().default("write"),
-        /** Taklif qabul qilinmaguncha token saqlanadi */
+        
         invite_token: varchar("invite_token", { length: 64 }),
         status: text("status", { enum: ["pending", "active", "revoked"] }).default("pending").notNull(),
         created_at: timestamp("created_at").defaultNow().notNull(),
@@ -148,7 +139,7 @@ export const shares = pgTable(
     ],
 );
 
-/** Kunlik eslatma dublikatini oldini olish. */
+
 export const notificationLogs = pgTable(
     "notification_logs",
     {

@@ -73,7 +73,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startNotificationScheduler() {
     if (timer) return;
-    // Har minut tekshiruv
+    
     void sendDueNotifications();
     timer = setInterval(() => {
         void sendDueNotifications();

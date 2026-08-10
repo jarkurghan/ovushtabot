@@ -26,9 +26,3 @@ export function setSession(tgId: number, data: Partial<SessionData> & { step: Se
 export function clearSession(tgId: number): void {
     sessions.delete(tgId);
 }
-
-export function resetSession(tgId: number): SessionData {
-    const data = fresh();
-    sessions.set(tgId, data);
-    return data;
-}

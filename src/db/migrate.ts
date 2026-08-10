@@ -9,7 +9,7 @@ async function main() {
         console.warn("drizzle/meta/_journal.json topilmadi — schema migrate o'tkazib yuborildi");
     }
 
-    // Account ulashish olib tashlandi — mavjud scope=all yozuvlarni yopish (idempotent)
+    
     await sql`
         UPDATE shares
         SET status = 'revoked', updated_at = now()
@@ -21,7 +21,7 @@ async function main() {
     ADD COLUMN IF NOT EXISTS hide_when_zero boolean NOT NULL DEFAULT false
     `;
 
-    // Bitta eslatma flag — notify_borrow / notify_lend o'rniga
+    
     await sql`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS notify_enabled boolean NOT NULL DEFAULT true
