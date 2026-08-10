@@ -1,6 +1,6 @@
 # Debt Bot
 
-Telegram bot for tracking debts (borrowed/lent), partial repayments, due-date reminders, and sharing access with another Telegram account.
+Telegram bot for tracking personal debts (borrowed / lent), partial repayments, due-date reminders, and linking a debt with the other party via invite link.
 
 ## Stack
 
@@ -11,12 +11,15 @@ Telegram bot for tracking debts (borrowed/lent), partial repayments, due-date re
 
 ## Features
 
-- Add debt (amount + counterparty + optional due date)
-- Debt items: extra charges and repayments (auto-close when balance hits 0)
-- Share debt / contact / all debts with view or write access via invite link
-- Due-date notifications at configurable time (default 09:00, Asia/Tashkent)
-- Toggle borrow/lend notifications in settings
+- Add debt (direction, counterparty, amount, optional note and due date)
+- Merge with an existing open debt for the same person and direction (extra charge), or net against the opposite direction (repay)
+- Debt items: charges and repayments; debt auto-closes when balance reaches 0; overpay opens a reverse-direction debt
+- People list, open debts, archive, and text summary
+- Share a single debt via invite link (`/start share_<token>`): creates a mirrored twin debt for the other user (full sync of items and due date)
+- Contact name collision on share: if the Telegram first name is already used, a new contact is created with suffix `2`, `3`, …
+- Due-date notifications at a configurable hour (default `09:00`, `Asia/Tashkent`); can be toggled in settings
 - Languages: Uzbek Latin (default) and Cyrillic
+- Multi-step writes run in DB transactions (create / repay / twin / accept share)
 
 ## Setup
 
@@ -32,14 +35,26 @@ bun run dev
 
 Webhook endpoint: `POST {WEBHOOK_URL}/bot`
 
+Health checks: `GET /` · `GET /health`
+
+## Scripts
+
+| Script | Description |
+|---|---|
+| `bun run dev` | Watch mode |
+| `bun run start` | Production start |
+| `bun run db:generate` | Generate Drizzle migrations |
+| `bun run db:migrate` | Apply migrations |
+| `bun run db:studio` | Drizzle Studio |
+
 ## Env
 
 | Variable | Description |
 |---|---|
 | `BOT_TOKEN` | Telegram bot token |
 | `DATABASE_URL` | Postgres connection string |
-| `WEBHOOK_URL` | Public HTTPS base URL |
+| `WEBHOOK_URL` | Public HTTPS base URL (webhook is set to `{WEBHOOK_URL}/bot`) |
 | `WEBHOOK_SECRET` | Telegram webhook secret token |
-| `PORT` | HTTP port (default 4040) |
-| `ADMIN_CHAT_ID` | Optional admin notifications |
-| `LOG_CHAT_ID` | Optional error logs |
+| `PORT` | HTTP port (default `4040`) |
+| `ADMIN_CHAT_ID` | Optional admin notifications (new users, status) |
+| `LOG_CHAT_ID` | Optional error / activity logs |
