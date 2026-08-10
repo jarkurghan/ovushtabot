@@ -685,6 +685,73 @@ export async function addDebtItem(params: {
     return { balance: Math.max(balance, 0), closed };
 }
 
+export type RepayDebtResult = {
+    repayAmount: number;
+    balance: number;
+    closed: boolean;
+    debtId: number;
+    remainderDebt?: DebtWithMeta;
+    remainderAmount?: number;
+    /** createDebt natijasi — notify uchun */
+    remainderCreate?: CreateDebtResult;
+};
+
+/** Qaytarish: balansdan ortiq bo'lsa teskari yo'nalishda yangi qarz */
+export async function repayDebt(params: {
+    debtId: number;
+    amount: number;
+    createdBy: number;
+    ownerId: number;
+    note?: string | null;
+}): Promise<RepayDebtResult> {
+    const debt = await getDebtById(params.debtId);
+    if (!debt) throw new Error("repayDebt: debt missing");
+
+    const bal = debt.balance > 0 ? debt.balance : 0;
+    const repayAmount = Math.min(params.amount, bal);
+    const remainder = params.amount - repayAmount;
+
+    let balance = bal;
+    let closed = bal <= 0;
+
+    if (repayAmount > 0) {
+        const result = await addDebtItem({
+            debtId: params.debtId,
+            type: "repay",
+            amount: repayAmount,
+            createdBy: params.createdBy,
+            note: params.note,
+        });
+        balance = result.balance;
+        closed = result.closed;
+    }
+
+    if (remainder <= 0) {
+        return { repayAmount, balance, closed, debtId: params.debtId };
+    }
+
+    const remainderCreate = await createDebt({
+        ownerId: params.ownerId,
+        contactName: debt.contact_name,
+        contactId: debt.contact_id,
+        direction: flipDirection(debt.direction),
+        amount: remainder,
+        dueDate: null,
+        createdBy: params.createdBy,
+        note: params.note,
+    });
+
+    return {
+        repayAmount,
+        balance,
+        closed,
+        debtId: params.debtId,
+        remainderAmount: remainder,
+        remainderDebt: remainderCreate.remainderDebt ?? remainderCreate.debt,
+        remainderCreate,
+    };
+}
+
 export async function setDueDate(debtId: number, dueDate: string | null, skipTwinSync = false) {
     await db.update(debts).set({ due_date: dueDate }).where(eq(debts.id, debtId));
     if (!skipTwinSync) {

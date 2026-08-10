@@ -33,6 +33,7 @@ import {
     listOwnedDebts,
     contactHasActiveDebt,
     renameContact,
+    repayDebt,
     resolveDebtAccess,
     setContactHideWhenZero,
     setDueDate,
@@ -218,24 +219,42 @@ async function continueAfterItemNote(ctx: CTX, user: User, lang: Lang, note: str
         }
         const debtId = session.debtId;
         const amount = session.amount;
-        const result = await addDebtItem({
+        const result = await repayDebt({
             debtId,
-            type: "repay",
             amount,
             createdBy: user.id,
+            ownerId: user.id,
             note,
         });
         clearSession(ctx.from!.id);
-        await notifyDebtItemAdded({
-            debtId,
-            actor: user,
-            type: "repay",
-            amount,
-            balance: result.balance,
-            closed: result.closed,
-        });
+
+        if (result.repayAmount > 0) {
+            await notifyDebtItemAdded({
+                debtId,
+                actor: user,
+                type: "repay",
+                amount: result.repayAmount,
+                balance: result.balance,
+                closed: result.closed,
+            });
+        }
+
         let msg = `${t(lang, "repaid")}\n${t(lang, "balance")}: ${formatAmount(result.balance, lang)}`;
         if (result.closed) msg += `\n${t(lang, "remain_zero_closed")}`;
+
+        if (result.remainderCreate && result.remainderAmount) {
+            await notifyAfterDebtCreate(result.remainderCreate, user);
+            msg += `\n\n${t(lang, "repay_overflow_new_debt", {
+                amount: formatAmount(result.remainderAmount, lang),
+            })}`;
+            msg += `\n\n${formatDebtCard(lang, result.remainderCreate.debt)}`;
+            await ctx.reply(msg, {
+                parse_mode: "HTML",
+                reply_markup: mainReplyKeyboard(lang),
+            });
+            return;
+        }
+
         await ctx.reply(msg, { reply_markup: mainReplyKeyboard(lang) });
         return;
     }
